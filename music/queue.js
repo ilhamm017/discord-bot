@@ -47,14 +47,25 @@ async function getTrackInfo(track) {
     throw new Error("Missing track URL");
   }
 
-  const info = await play.video_basic_info(track.url);
-  track.info = info;
+  try {
+    const info = await play.video_basic_info(track.url);
+    track.info = info;
 
-  if (!track.title) {
-    track.title = info.video_details?.title || track.url;
+    if (!track.title) {
+      track.title = info.video_details?.title || track.url;
+    }
+
+    return info;
+  } catch (error) {
+    logger.warn("Failed fetching track info, continuing without metadata.", {
+      url: track.url,
+      error,
+    });
+    if (!track.title) {
+      track.title = track.url;
+    }
+    return null;
   }
-
-  return info;
 }
 
 function ensureValidTrackUrl(track) {
