@@ -4,7 +4,10 @@ const {
   getUserCallName,
   setUserCallName,
   clearUserCallName,
+  addUserMemory,
+  listUserMemory,
 } = require("../storage/db");
+const { answerBotQuestion, isBotQuestion } = require("./bot_docs");
 let config = {};
 
 try {
@@ -19,6 +22,31 @@ const AI_CONTEXT_LIMIT = Number.isInteger(config.groq_chat_context_messages)
   : Number.isInteger(config.groq_context_messages)
     ? config.groq_context_messages
     : 6;
+const AI_HISTORY_FETCH_LIMIT = Number.isInteger(config.groq_chat_history_fetch_limit)
+  ? config.groq_chat_history_fetch_limit
+  : Number.isInteger(config.groq_history_fetch_limit)
+    ? config.groq_history_fetch_limit
+    : 80;
+const AI_HISTORY_MAX_CHARS = Number.isInteger(config.groq_chat_history_max_chars)
+  ? config.groq_chat_history_max_chars
+  : Number.isInteger(config.groq_history_max_chars)
+    ? config.groq_history_max_chars
+    : 500;
+const AI_MEMORY_ENABLED =
+  typeof config.ai_memory_enabled === "boolean"
+    ? config.ai_memory_enabled
+    : true;
+const AI_MEMORY_MAX_ITEMS = Number.isInteger(config.ai_memory_max_items)
+  ? config.ai_memory_max_items
+  : 8;
+const AI_MEMORY_TTL_DAYS = Number.isInteger(config.ai_memory_ttl_days)
+  ? config.ai_memory_ttl_days
+  : 90;
+const AI_MEMORY_MAX_VALUE_CHARS = Number.isInteger(
+  config.ai_memory_max_value_chars
+)
+  ? config.ai_memory_max_value_chars
+  : 80;
 const AI_TEMPERATURE = Number.isFinite(Number(config.groq_chat_temperature))
   ? Number(config.groq_chat_temperature)
   : Number.isFinite(Number(config.groq_temperature))
@@ -31,7 +59,16 @@ const AI_MAX_TOKENS = Number.isFinite(Number(config.groq_chat_max_tokens))
     : 200;
 const AI_MAX_MESSAGE_LENGTH = 1800;
 const MEMBER_SAMPLE_LIMIT = 8;
-const MEMBER_FETCH_COOLDOWN_MS = 60 * 1000;
+const MEMBER_FETCH_MODE = String(
+  config.guild_members_fetch_mode ||
+    config.guildMembersFetchMode ||
+    "sample"
+).toLowerCase();
+const MEMBER_FETCH_COOLDOWN_MS = Number.isInteger(
+  config.guild_members_fetch_cooldown_ms
+)
+  ? config.guild_members_fetch_cooldown_ms
+  : 10 * 60 * 1000;
 const lastMemberFetchAt = new Map();
 const AI_COMMANDS = [
   "play",
@@ -47,6 +84,9 @@ const AI_COMMANDS = [
   "ucapkan",
   "panggil",
   "join",
+  "jelaskan",
+  "member",
+  "cek",
 ];
 
 function sanitizeMessage(text) {
@@ -94,6 +134,127 @@ function getAuthorCallName(message) {
 function replaceGenericCall(text, callName) {
   if (!callName) return text;
   return text.replace(/\bbro\b/gi, callName);
+}
+
+const MEMORY_PATTERNS = [
+  {
+    kind: "dislike",
+    regex: /\b(?:aku|saya)\s+(?:gak|ga|nggak|tidak)\s+suka\s+(.+)/i,
+  },
+  { kind: "like", regex: /\b(?:aku|saya)\s+suka\s+(.+)/i },
+  {
+    kind: "hobi",
+    regex: /\bhobi(?:ku| saya| aku)?\s*(?:adalah|:)?\s+(.+)/i,
+  },
+  {
+    kind: "favorit",
+    regex: /\bfavorit(?:ku| saya| aku)?\s*(?:adalah|:)?\s+(.+)/i,
+  },
+  { kind: "prefer", regex: /\b(?:aku|saya)\s+prefer\s+(.+)/i },
+];
+
+function sanitizeMemoryValue(value) {
+  let cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  if (cleaned.includes("?")) return "";
+  cleaned = cleaned.replace(/@everyone/gi, "everyone").replace(/@here/gi, "here");
+  cleaned = cleaned.replace(/<@!?\d+>/g, "").trim();
+  if (!cleaned) return "";
+  if (cleaned.length > AI_MEMORY_MAX_VALUE_CHARS) {
+    cleaned = cleaned.slice(0, AI_MEMORY_MAX_VALUE_CHARS).trim();
+  }
+  return cleaned;
+}
+
+function extractMemoryEntries(prompt) {
+  if (!AI_MEMORY_ENABLED) return [];
+  const text = String(prompt || "").trim();
+  if (!text) return [];
+
+  const entries = [];
+  for (const { kind, regex } of MEMORY_PATTERNS) {
+    const match = text.match(regex);
+    if (!match) continue;
+    const rawValue = match[1];
+    const value = sanitizeMemoryValue(rawValue);
+    if (value) {
+      entries.push({ kind, value });
+    }
+  }
+  return entries;
+}
+
+function buildMemorySummary(userId) {
+  if (!AI_MEMORY_ENABLED || !userId) return "";
+  const rows = listUserMemory(userId, {
+    limit: AI_MEMORY_MAX_ITEMS,
+    ttlDays: AI_MEMORY_TTL_DAYS,
+  });
+  if (!rows.length) return "";
+
+  const labels = {
+    like: "Suka",
+    dislike: "Tidak suka",
+    hobi: "Hobi",
+    favorit: "Favorit",
+    prefer: "Prefer",
+  };
+
+  const seen = new Set();
+  const lines = [];
+  for (const row of rows) {
+    const label = labels[row.kind] || row.kind;
+    const value = String(row.value || "").trim();
+    if (!value) continue;
+    const key = `${row.kind}:${value}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`- ${label}: ${value}`);
+  }
+  if (!lines.length) return "";
+  return `Catatan memori user:\n${lines.join("\n")}`;
+}
+
+const APOLOGY_PATTERNS = [
+  /\b(maaf|minta maaf|sorry|sori|ampun)\b/i,
+  /\b(udah|udahan|stop|sudah)\s*(debat|ribut|berantem|adu bacot|drama)\b/i,
+  /\b(udah cukup|cukup ya|udah ya)\b/i,
+  /\b(damai|baik-baik|baikan)\b/i,
+];
+
+const POLITE_PATTERNS = [
+  /\b(tolong|mohon|please|plis|permisi)\b/i,
+  /\b(terima kasih|makasih|makasi|thanks)\b/i,
+  /\b(minta bantuan|bisa bantu)\b/i,
+];
+
+function getToneHint(prompt) {
+  const text = String(prompt || "").trim();
+  if (!text) {
+    return {
+      mode: "normal",
+      hint:
+        "Mode santai: boleh nyinyir/roast ringan dan sarkas tipis, tapi tetap sopan.",
+    };
+  }
+
+  const isApology = APOLOGY_PATTERNS.some((pattern) => pattern.test(text));
+  const isPolite = POLITE_PATTERNS.some((pattern) => pattern.test(text));
+
+  if (isApology || isPolite) {
+    return {
+      mode: "friendly",
+      hint:
+        "Mode ramah: jawab sopan, bantu, dan hentikan debat. " +
+        "Jangan nyinyir/roast/sarkas berlebihan.",
+    };
+  }
+
+  return {
+    mode: "normal",
+    hint:
+      "Mode santai: boleh nyinyir/roast ringan dan sarkas tipis, tapi tetap sopan.",
+  };
 }
 
 function parseCallNameInstruction(prompt) {
@@ -205,7 +366,8 @@ function describeMember(member) {
 async function ensureMemberCache(guild) {
   if (!guild?.members?.fetch) return;
   const cacheSize = guild.members?.cache?.size || 0;
-  if (cacheSize >= MEMBER_SAMPLE_LIMIT) return;
+  const memberCount = guild.memberCount || 0;
+  if (MEMBER_FETCH_MODE === "off") return;
 
   const now = Date.now();
   const lastFetch = lastMemberFetchAt.get(guild.id) || 0;
@@ -213,6 +375,12 @@ async function ensureMemberCache(guild) {
 
   lastMemberFetchAt.set(guild.id, now);
   try {
+    if (MEMBER_FETCH_MODE === "full") {
+      if (memberCount > 0 && cacheSize >= memberCount) return;
+      await guild.members.fetch();
+      return;
+    }
+    if (cacheSize >= MEMBER_SAMPLE_LIMIT) return;
     await guild.members.fetch({ limit: MEMBER_SAMPLE_LIMIT });
   } catch (error) {
     logger.warn("Failed fetching guild members for AI context.", error);
@@ -268,7 +436,8 @@ async function getChatHistory(channel, authorId, botId, excludeMessageId) {
 
   let fetched;
   try {
-    fetched = await channel.messages.fetch({ limit: 50 });
+    const limit = Math.max(10, Math.min(AI_HISTORY_FETCH_LIMIT, 100));
+    fetched = await channel.messages.fetch({ limit });
   } catch (error) {
     logger.warn("Failed fetching chat history for AI.", error);
     return [];
@@ -289,9 +458,10 @@ async function getChatHistory(channel, authorId, botId, excludeMessageId) {
     .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
     .slice(-AI_CONTEXT_LIMIT);
 
+  const maxChars = Math.max(80, Math.min(AI_HISTORY_MAX_CHARS, 1200));
   return messages.map((msg) => ({
     role: msg.author?.id === botId ? "assistant" : "user",
-    content: msg.content.trim().slice(0, 500),
+    content: msg.content.trim().slice(0, maxChars),
   }));
 }
 
@@ -301,17 +471,26 @@ async function generateAiReply(message, prompt, options = {}) {
   if (!authorId || !botId) return "";
 
   const callName = getAuthorCallName(message);
+  const tone = getToneHint(prompt);
+  const memorySummary = buildMemorySummary(authorId);
   const systemPrompt =
-    "Kamu adalah Yova, bot Discord yang menjawab dengan Bahasa Indonesia gaul. " +
-    "Gaya bicara banyak bacot ala Gen Z: cerewet, receh, gampang diajak bercanda, " +
-    "rada sewot, dan boleh sesekali mengumpat ringan. " +
-    "Tetap jangan menyerang SARA atau menghina personal. " +
+    "Kamu adalah Yova, bot Discord yang menjawab dengan Bahasa Indonesia gaul internet. " +
+    "Persona: chibi/tsundere/kamidere vibe yang imut tapi sombong dan lucu; kadang pamer diri (contoh: \"Yova paling kece di sini\"). " +
+    "Jangan menyebut diri anak/bocil/loli, tetap dewasa. " +
+    "Tulis jawaban dengan slang, singkatan, dan sedikit sarkas. " +
+    "Gunakan kata-kata seperti: wkwk, gas, no debat, receh, copium, skill issue, triggered. " +
+    "Gaya santai, kayak netizen ribut di Twitter/Discord. " +
+    "Boleh mengumpat ringan sesekali, tapi jangan menyerang personal, fisik, keluarga, atau SARA. " +
+    "Jangan simpan dendam; fokus ke pesan terakhir. " +
+    "Kalau user minta maaf/udahan debat, jadi baik dan akhiri debat. " +
+    `${tone.hint} ` +
     "Kalau tidak tahu, boleh kasih tebakan ringan atau bilang belum tahu, lalu tambahkan pertanyaan balik yang nyambung. " +
     (callName
       ? `Jika menyebut penanya, gunakan panggilan "${callName}" (bukan "bro"). `
       : "Jika menyebut penanya, jangan gunakan panggilan umum seperti \"bro\". ") +
-    "Jawab 2-4 kalimat, kecuali diminta singkat. " +
+    "Jawab 2-5 kalimat, kecuali diminta singkat. " +
     "Jangan gunakan @everyone atau @here.";
+  const memoryContext = memorySummary ? `\n\n${memorySummary}` : "";
 
   const history = await getChatHistory(
     message.channel,
@@ -325,8 +504,8 @@ async function generateAiReply(message, prompt, options = {}) {
   try {
     content = await chatCompletion({
       system: serverContext
-        ? `${systemPrompt}\n\nInformasi server:\n${serverContext}`
-        : systemPrompt,
+        ? `${systemPrompt}${memoryContext}\n\nInformasi server:\n${serverContext}`
+        : `${systemPrompt}${memoryContext}`,
       messages: [...history, { role: "user", content: prompt }],
       temperature: AI_TEMPERATURE,
       maxTokens: AI_MAX_TOKENS,
@@ -373,7 +552,25 @@ async function handleAiRequest(message, prompt) {
     };
   }
 
+  if (AI_MEMORY_ENABLED && userId) {
+    const entries = extractMemoryEntries(prompt);
+    if (entries.length) {
+      for (const entry of entries) {
+        addUserMemory({ userId, kind: entry.kind, value: entry.value });
+      }
+    }
+  }
+
+  if (isBotQuestion(prompt)) {
+    return {
+      type: "reply",
+      message: answerBotQuestion(prompt),
+    };
+  }
+
   const callName = getAuthorCallName(message);
+  const memorySummary = buildMemorySummary(userId);
+  const tone = getToneHint(prompt);
   if (message.guild) {
     await ensureMemberCache(message.guild);
   }
@@ -388,11 +585,19 @@ async function handleAiRequest(message, prompt) {
     ". " +
     "Jika pengguna meminta memutar musik, gunakan command play dan isi args dengan judul/URL. " +
     "Jika pengguna meminta bot masuk/join voice, gunakan command join dan isi args dengan nama channel atau mention user. " +
+    "Jika pengguna meminta penjelasan bot, gunakan command jelaskan. " +
+    "Jika pengguna minta cek member/anggota server (awal/baru/daftar/jumlah), gunakan command member. " +
     "Jika pengguna bertanya/bercakap-cakap, gunakan type reply dan tulis jawaban. " +
     "Jika pengguna meminta info server, jawab dengan type reply berdasarkan info server yang tersedia. " +
     "Jika data tidak tersedia, katakan tidak punya akses. " +
-    "Gaya reply: banyak bacot ala Gen Z, gaul, rada sewot, gampang diajak bercanda, " +
-    "boleh sesekali mengumpat ringan, tapi jangan menghina personal/SARA. " +
+    "Persona: chibi/tsundere/kamidere vibe yang imut tapi sombong dan lucu; kadang pamer diri. " +
+    "Jangan menyebut diri anak/bocil/loli, tetap dewasa. " +
+    "Gaya reply: gaul internet, nyinyir tipis, sedikit sarkas, gampang diajak bercanda, " +
+    "boleh nge-roast ringan dan mengumpat ringan, tapi jangan menghina personal/fisik/keluarga/SARA. " +
+    "Gunakan kata-kata seperti: wkwk, gas, no debat, receh, copium, skill issue, triggered. " +
+    "Jangan simpan dendam; fokus ke pesan terakhir. " +
+    "Kalau user minta maaf/udahan debat, jadi baik dan akhiri debat. " +
+    `${tone.hint} ` +
     "Kalau reply menyatakan tidak tahu, tambahkan pertanyaan balik yang nyambung. " +
     (callName
       ? `Jika menyebut penanya, gunakan panggilan "${callName}" (bukan "bro"). `
@@ -402,7 +607,8 @@ async function handleAiRequest(message, prompt) {
   const routerUser =
     `Pesan pengguna: "${prompt}"\n` +
     (callName ? `Nama panggilan penanya: "${callName}".\n` : "") +
-    `\nInformasi server:\n${serverContext}`;
+    (memorySummary ? `\n${memorySummary}\n` : "\n") +
+    `Informasi server:\n${serverContext}`;
 
   let raw;
   try {

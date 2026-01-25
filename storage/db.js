@@ -57,6 +57,23 @@ function initDatabase() {
         call_name TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS spotify_cache (
+        spotify_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        artists TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        youtube_url TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS user_memory (
+        user_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, kind, value)
+      );
     `);
 
     statements = {
@@ -129,6 +146,35 @@ function initDatabase() {
       deleteUserPreference: db.prepare(
         "DELETE FROM user_preferences WHERE user_id = ?"
       ),
+      upsertSpotifyCache: db.prepare(`
+        INSERT INTO spotify_cache
+          (spotify_id, title, artists, duration_ms, youtube_url, updated_at)
+        VALUES (@spotifyId, @title, @artists, @durationMs, @youtubeUrl, @updatedAt)
+        ON CONFLICT(spotify_id) DO UPDATE SET
+          title = excluded.title,
+          artists = excluded.artists,
+          duration_ms = excluded.duration_ms,
+          youtube_url = excluded.youtube_url,
+          updated_at = excluded.updated_at
+      `),
+      selectSpotifyCache: db.prepare(`
+        SELECT spotify_id, title, artists, duration_ms, youtube_url, updated_at
+        FROM spotify_cache
+        WHERE spotify_id = ?
+      `),
+      upsertUserMemory: db.prepare(`
+        INSERT INTO user_memory (user_id, kind, value, updated_at)
+        VALUES (@userId, @kind, @value, @updatedAt)
+        ON CONFLICT(user_id, kind, value) DO UPDATE SET
+          updated_at = excluded.updated_at
+      `),
+      selectUserMemory: db.prepare(`
+        SELECT kind, value, updated_at
+        FROM user_memory
+        WHERE user_id = ?
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `),
     };
   } catch (error) {
     logger.error("Failed to initialize database.", error);
@@ -337,6 +383,83 @@ function clearUserCallName(userId) {
   }
 }
 
+function saveSpotifyCache(entry) {
+  if (!entry?.spotifyId || !entry?.youtubeUrl) return false;
+  if (!ensureReady()) return false;
+
+  try {
+    const result = statements.upsertSpotifyCache.run({
+      spotifyId: entry.spotifyId,
+      title: entry.title || "",
+      artists: entry.artists || "",
+      durationMs: Number(entry.durationMs) || 0,
+      youtubeUrl: entry.youtubeUrl,
+      updatedAt: Date.now(),
+    });
+    return result.changes > 0;
+  } catch (error) {
+    logger.error("Failed saving Spotify cache.", error);
+    return false;
+  }
+}
+
+function getSpotifyCache(spotifyId) {
+  if (!spotifyId) return null;
+  if (!ensureReady()) return null;
+
+  try {
+    const row = statements.selectSpotifyCache.get(spotifyId);
+    if (!row) return null;
+    return {
+      spotifyId: row.spotify_id,
+      title: row.title,
+      artists: row.artists,
+      durationMs: row.duration_ms,
+      youtubeUrl: row.youtube_url,
+      updatedAt: row.updated_at,
+    };
+  } catch (error) {
+    logger.error("Failed loading Spotify cache.", error);
+    return null;
+  }
+}
+
+function addUserMemory({ userId, kind, value }) {
+  if (!userId || !kind || !value) return false;
+  if (!ensureReady()) return false;
+
+  try {
+    const result = statements.upsertUserMemory.run({
+      userId,
+      kind,
+      value,
+      updatedAt: Date.now(),
+    });
+    return result.changes > 0;
+  } catch (error) {
+    logger.error("Failed saving user memory.", error);
+    return false;
+  }
+}
+
+function listUserMemory(userId, { limit = 10, ttlDays = 90 } = {}) {
+  if (!userId) return [];
+  if (!ensureReady()) return [];
+
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
+  const ttl = Number(ttlDays) || 0;
+  const cutoff = ttl > 0 ? Date.now() - ttl * 86400 * 1000 : 0;
+
+  try {
+    const rows = statements.selectUserMemory.all(userId, safeLimit);
+    if (!rows.length) return [];
+    return rows.filter((row) => !cutoff || row.updated_at >= cutoff);
+  } catch (error) {
+    logger.error("Failed loading user memory.", error);
+    return [];
+  }
+}
+
 module.exports = {
   initDatabase,
   saveQueueState,
@@ -349,4 +472,8 @@ module.exports = {
   setUserCallName,
   getUserCallName,
   clearUserCallName,
+  saveSpotifyCache,
+  getSpotifyCache,
+  addUserMemory,
+  listUserMemory,
 };

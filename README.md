@@ -42,6 +42,16 @@ npm install
 
 Opsional:
 - `default_voice_channel`: nama atau ID voice channel default untuk perintah `join`.
+- `spotify_client_id`: Spotify Client ID (untuk resolve metadata).
+- `spotify_client_secret`: Spotify Client Secret.
+- `typing_delay_enabled`: aktifkan efek mengetik sebelum bot membalas.
+- `typing_delay_min_ms` / `typing_delay_max_ms`: rentang delay dasar efek mengetik.
+- `typing_delay_per_char_ms`: tambahan delay per karakter.
+- `ai_memory_enabled`: simpan memori otomatis (preferensi ringan dari chat).
+- `ai_memory_max_items`: jumlah memori yang dimasukkan ke prompt.
+- `ai_memory_ttl_days`: umur maksimal memori dalam hari (0 = tidak kedaluwarsa).
+- `guild_members_fetch_mode`: mode fetch member untuk AI context (`sample`, `full`, `off`).
+- `guild_members_fetch_cooldown_ms`: jeda fetch member agar tidak terlalu sering.
 
 3. Pastikan intent Discord sudah aktif di Developer Portal:
 - Message Content Intent (untuk membaca pesan).
@@ -59,6 +69,7 @@ Semua perintah memakai prefix dari `config.json` (contoh `yova`).
 
 ### Musik
 - `yova play <judul|url>`: putar lagu.
+- `yova play <spotify url>`: putar lagu/playlist/album Spotify (dipetakan ke YouTube).
 - `yova play kesukaanku`: putar daftar favorit global (>= 5 kali diputar).
 - `yova join <nama_channel|@user|default>`: bot masuk ke voice channel.
 - `yova pause`: pause/resume.
@@ -77,6 +88,9 @@ Semua perintah memakai prefix dari `config.json` (contoh `yova`).
 - `yova ucapkan <pesan> @user`: buat pesan otomatis untuk target.
 - `yova panggil aku <nama>`: simpan panggilan untuk kamu (dipakai AI).
 - `yova <pesan bebas>`: AI chat atau AI merutekan ke perintah yang diizinkan.
+- `yova jelaskan dirimu`: tampilkan ringkasan fitur bot.
+- `yova member awal|baru|daftar|jumlah [n]`: info member server.
+- `yova cek member ...`: alias untuk `member`.
 
 Perintah yang bisa dirutekan AI: `play`, `pause`, `skip`, `next`, `sebelumnya`, `stop`, `leave`, `kontrol`, `kesukaanku`, `restore`, `ucapkan`.
 
@@ -101,6 +115,7 @@ Daftar antrian dapat dipilih untuk memutar nomor tertentu.
    - `play` menambah antrian dan menghubungkan bot ke voice channel.
    - Audio stream dibuat via `yt-dlp` (fallback), lalu diputar lewat `@discordjs/voice`.
    - Auto-next, repeat track/playlist, serta auto-skip ketika error.
+   - Link Spotify hanya dipakai sebagai metadata, playback tetap dari YouTube.
 4. **Persistence**:
    - Queue dan state tersimpan di SQLite (`.data/bot.db`).
    - `restore` memuat antrian kembali tanpa langsung memutar.
@@ -125,7 +140,9 @@ Pengaturan:
 - `music/`: queue, panel, voice, dan streaming.
 - `storage/`: SQLite persistence.
 - `utils/`: logger, Groq, AI chat.
+- `docs/BOT_HELP.md`: ringkasan fitur untuk ditampilkan di chat.
 
 ## Catatan penting
 - Jika ada error 403 dari YouTube, biasanya berasal dari akses stream yang dibatasi. Coba ulang atau ganti sumber lagu.
 - Info anggota server bergantung pada cache dan intent Discord. Jika kosong, aktifkan Server Members Intent.
+- Spotify tidak bisa diputar langsung (DRM). Bot memakai judul/artis Spotify untuk mencari lagu di YouTube.

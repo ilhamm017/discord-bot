@@ -6,6 +6,7 @@ const { token, prefix = "!" } = config;
 const logger = require("./utils/logger");
 const { initDatabase } = require("./storage/db");
 const { handleAiRequest } = require("./utils/ai_chat");
+const { waitWithTyping } = require("./utils/typing");
 const {
   getState,
   jumpToIndex,
@@ -304,6 +305,7 @@ client.on("messageCreate", async (message) => {
 
       const reply = aiResult?.message?.trim();
       if (reply) {
+        await waitWithTyping(message.channel, reply);
         await message.reply(reply);
       } else {
         await message.reply("Nggak paham maksudnya.");

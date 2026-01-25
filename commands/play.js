@@ -4,10 +4,17 @@ const { enqueueTrack, enqueueTracks, getState } = require("../music/queue");
 const logger = require("../utils/logger");
 const { updateControlPanel } = require("../music/panel");
 const { getFavoriteTracks } = require("../storage/db");
+const {
+  parseSpotifyInput,
+  isSpotifyConfigured,
+  fetchSpotifyCollection,
+  resolveSpotifyTracks,
+} = require("../utils/spotify");
 
 const FAVORITES_MIN_PLAYS = 5;
 const FAVORITES_LIMIT = 20;
 const MENTION_REGEX = /<@!?\d+>/g;
+const MENTION_TEST_REGEX = /<@!?\d+>/;
 
 function resolveTargetVoiceChannel(message) {
   const mentionedMember = message.mentions?.members
@@ -32,13 +39,13 @@ function resolveTargetVoiceChannel(message) {
   return { channel: memberChannel, targetMember: null };
 }
 
-function stripTargetTokens(query) {
+function stripTargetTokens(query, { hasMention } = {}) {
   if (!query) return "";
-  return query
-    .replace(MENTION_REGEX, " ")
-    .replace(/\b(untuk|buat)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  let cleaned = query.replace(MENTION_REGEX, " ");
+  if (hasMention) {
+    cleaned = cleaned.replace(/\b(untuk|buat)\b/gi, " ");
+  }
+  return cleaned.replace(/\s+/g, " ").trim();
 }
 
 module.exports = {
@@ -56,7 +63,8 @@ module.exports = {
     const voiceChannel = target.channel;
 
     const rawQuery = args.join(" ").trim();
-    const query = stripTargetTokens(rawQuery);
+    const hasMention = MENTION_TEST_REGEX.test(rawQuery);
+    const query = stripTargetTokens(rawQuery, { hasMention });
     if (!query) {
       return message.reply(
         "Masukkan URL atau judul. Contoh: yova play <url/judul>"
@@ -132,6 +140,150 @@ module.exports = {
         `Kesukaanku ditambahkan (${tracks.length} lagu), mulai antrian #${result.startPosition}.`
       );
     }
+    const spotifyRef = parseSpotifyInput(query);
+    if (spotifyRef) {
+      if (!isSpotifyConfigured()) {
+        return message.reply(
+          "Spotify API belum diset. Isi spotify_client_id dan spotify_client_secret di config.json."
+        );
+      }
+
+      let collection;
+      try {
+        collection = await fetchSpotifyCollection(spotifyRef);
+      } catch (error) {
+        logger.error("Failed fetching Spotify data.", error);
+        return message.reply("Gagal mengambil data dari Spotify.");
+      }
+
+      if (!collection.tracks.length) {
+        return message.reply("Data Spotify kosong atau tidak bisa dibaca.");
+      }
+
+      let resolved;
+      try {
+        resolved = await resolveSpotifyTracks(collection.tracks);
+      } catch (error) {
+        logger.error("Failed resolving Spotify tracks.", error);
+        return message.reply("Gagal memetakan Spotify ke YouTube.");
+      }
+
+      if (resolved.resolved.length === 0) {
+        return message.reply("Tidak menemukan lagu di YouTube untuk Spotify.");
+      }
+
+      const tracks = resolved.resolved.map((item) => ({
+        url: item.url,
+        title: item.title || item.url,
+        requestedBy: message.author.tag,
+        requestedById: message.author.id,
+        requestedByTag: message.author.tag,
+        source: "spotify",
+        originUrl: query,
+      }));
+
+      if (tracks.length === 1) {
+        let result;
+        try {
+          result = await enqueueTrack(voiceChannel, tracks[0], {
+            textChannelId: message.channel.id,
+          });
+        } catch (error) {
+          logger.error("Queue error.", error);
+          const state = message.guild ? getState(message.guild.id) : null;
+          const status = state?.player?.state?.status;
+          if (
+            status === AudioPlayerStatus.Playing ||
+            status === AudioPlayerStatus.Buffering
+          ) {
+            return;
+          }
+          if (error?.message === "STREAM_NEEDS_FFMPEG") {
+            return message.reply(
+              "Format audio butuh FFmpeg. Install FFmpeg atau gunakan link lain."
+            );
+          }
+          if (error?.message === "STREAM_FALLBACK_FAILED") {
+            return message.reply(
+              "Gagal memutar audio (fallback yt-dlp). Coba lagi nanti."
+            );
+          }
+          if (error?.message === "YTDLP_DOWNLOAD_FAILED") {
+            return message.reply(
+              "Gagal mengunduh yt-dlp. Cek koneksi atau coba lagi nanti."
+            );
+          }
+          return message.reply("Gagal memutar audio.");
+        }
+
+        try {
+          await updateControlPanel(message.client, result.state);
+        } catch (error) {
+          logger.warn("Failed updating control panel.", error);
+        }
+
+        if (result.started) {
+          return message.reply(`Memutar: ${tracks[0].title}`);
+        }
+        return message.reply(
+          `Ditambahkan ke antrian #${result.position}: ${tracks[0].title}`
+        );
+      }
+
+      let result;
+      try {
+        result = await enqueueTracks(voiceChannel, tracks, {
+          textChannelId: message.channel.id,
+        });
+      } catch (error) {
+        logger.error("Queue error.", error);
+        const state = message.guild ? getState(message.guild.id) : null;
+        const status = state?.player?.state?.status;
+        if (
+          status === AudioPlayerStatus.Playing ||
+          status === AudioPlayerStatus.Buffering
+        ) {
+          return;
+        }
+        if (error?.message === "STREAM_NEEDS_FFMPEG") {
+          return message.reply(
+            "Format audio butuh FFmpeg. Install FFmpeg atau gunakan link lain."
+          );
+        }
+        if (error?.message === "STREAM_FALLBACK_FAILED") {
+          return message.reply(
+            "Gagal memutar audio (fallback yt-dlp). Coba lagi nanti."
+          );
+        }
+        if (error?.message === "YTDLP_DOWNLOAD_FAILED") {
+          return message.reply(
+            "Gagal mengunduh yt-dlp. Cek koneksi atau coba lagi nanti."
+          );
+        }
+        return message.reply("Gagal memutar audio.");
+      }
+
+      try {
+        await updateControlPanel(message.client, result.state);
+      } catch (error) {
+        logger.warn("Failed updating control panel.", error);
+      }
+
+      const name = collection.name || "Spotify";
+      const failedCount = resolved.failed.length;
+      if (result.started) {
+        return message.reply(
+          `Memutar ${name} (${tracks.length} lagu).` +
+            (failedCount ? ` ${failedCount} lagu gagal dipetakan.` : "")
+        );
+      }
+
+      return message.reply(
+        `${name} ditambahkan (${tracks.length} lagu), mulai antrian #${result.startPosition}.` +
+          (failedCount ? ` ${failedCount} lagu gagal dipetakan.` : "")
+      );
+    }
+
     let url = query;
     let title;
     let info;
