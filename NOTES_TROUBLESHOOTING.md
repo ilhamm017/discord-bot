@@ -30,6 +30,9 @@
   - `music/queue.js` (prioritas metadata dan opt-in play-dl)
   - `music/ytdlp.js` (cookies, JS runtime, format)
 
+## Catatan cookies
+- File `cookies.txt` dibutuhkan untuk akses YouTube, tetapi **tidak** di-commit karena sensitif.
+
 ## Catatan operasional
 - Jika kembali error permission, pastikan shell sudah mewarisi group `www` (logout/login atau `newgrp www`).
 - Jika YouTube kembali meminta login, perbarui cookies dan restart bot.
