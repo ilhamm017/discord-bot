@@ -68,6 +68,17 @@ Opsional:
 npm start
 ```
 
+## Docker (opsional)
+Pastikan `config.json` sudah terisi di host.
+
+```bash
+docker compose up -d --build
+```
+
+Data persisten:
+- `./.data` untuk SQLite dan yt-dlp cache
+- `./logs` untuk log harian
+
 Catatan: yt-dlp akan otomatis diunduh ke `.data/yt-dlp` saat pertama kali streaming.
 
 ## Daftar perintah
