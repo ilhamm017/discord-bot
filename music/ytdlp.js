@@ -8,6 +8,27 @@ const YTDlpWrap = require("yt-dlp-wrap").default;
 const dataDir = path.join(__dirname, "..", ".data");
 const binaryName = os.platform() === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const binaryPath = path.join(dataDir, binaryName);
+const defaultCookiesPath = path.join(dataDir, "cookies.txt");
+const defaultJsRuntime = "node";
+const defaultFormat = "bestaudio/best";
+
+// Allow env override for cookies; fall back to .data/cookies.txt.
+function resolveCookiesPath() {
+  const envPath = process.env.YTDLP_COOKIES;
+  if (envPath && fs.existsSync(envPath)) return envPath;
+  if (fs.existsSync(defaultCookiesPath)) return defaultCookiesPath;
+  return null;
+}
+
+function resolveJsRuntime() {
+  const runtime = String(process.env.YTDLP_JS_RUNTIME || "").trim();
+  return runtime ? runtime : defaultJsRuntime;
+}
+
+function resolveFormat() {
+  const format = String(process.env.YTDLP_FORMAT || "").trim();
+  return format ? format : defaultFormat;
+}
 
 async function ensureBinary() {
   if (fs.existsSync(binaryPath)) return binaryPath;
@@ -30,14 +51,20 @@ async function ensureBinary() {
 
 async function streamWithYtDlp(url) {
   const binary = await ensureBinary();
+  const cookiesPath = resolveCookiesPath();
+  const jsRuntime = resolveJsRuntime();
+  const format = resolveFormat();
   const args = [
     url,
     "--no-playlist",
     "--no-warnings",
     "--no-progress",
     "-q",
+    ...(cookiesPath ? ["--cookies", cookiesPath] : []),
+    "--js-runtimes",
+    jsRuntime,
     "-f",
-    "bestaudio[acodec=opus]/bestaudio",
+    format,
     "--retries",
     "3",
     "--fragment-retries",
@@ -95,6 +122,8 @@ async function searchWithYtDlp(query, limit = 5) {
   if (!query) return [];
   const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 25));
   const binary = await ensureBinary();
+  const cookiesPath = resolveCookiesPath();
+  const jsRuntime = resolveJsRuntime();
   const args = [
     `ytsearch${safeLimit}:${query}`,
     "--no-playlist",
@@ -103,6 +132,9 @@ async function searchWithYtDlp(query, limit = 5) {
     "--no-warnings",
     "--no-progress",
     "-q",
+    ...(cookiesPath ? ["--cookies", cookiesPath] : []),
+    "--js-runtimes",
+    jsRuntime,
   ];
 
   return new Promise((resolve, reject) => {
@@ -159,6 +191,8 @@ async function searchWithYtDlp(query, limit = 5) {
 async function getInfoWithYtDlp(url) {
   if (!url) return null;
   const binary = await ensureBinary();
+  const cookiesPath = resolveCookiesPath();
+  const jsRuntime = resolveJsRuntime();
   const args = [
     url,
     "--no-playlist",
@@ -167,6 +201,9 @@ async function getInfoWithYtDlp(url) {
     "--no-warnings",
     "--no-progress",
     "-q",
+    ...(cookiesPath ? ["--cookies", cookiesPath] : []),
+    "--js-runtimes",
+    jsRuntime,
   ];
 
   return new Promise((resolve, reject) => {

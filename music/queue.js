@@ -35,6 +35,49 @@ function notifyPanel(state, reason) {
     });
 }
 
+// Prefer yt-dlp metadata to avoid play-dl auth prompts.
+function buildInfoFromYtDlp(data, url) {
+  if (!data) return null;
+  const thumbnails = Array.isArray(data.thumbnails)
+    ? data.thumbnails
+        .map((thumb) => ({
+          url: thumb?.url,
+          width: thumb?.width,
+          height: thumb?.height,
+        }))
+        .filter((thumb) => thumb.url)
+    : [];
+  if (!thumbnails.length && data.thumbnail) {
+    thumbnails.push({ url: data.thumbnail });
+  }
+
+  return {
+    video_details: {
+      title: data.title || url,
+      url: data.webpage_url || data.original_url || url,
+      durationInSec: Number.isFinite(data.duration) ? data.duration : null,
+      thumbnails,
+    },
+  };
+}
+
+async function tryGetInfoWithYtDlp(track) {
+  try {
+    const data = await getInfoWithYtDlp(track.url);
+    const info = buildInfoFromYtDlp(data, track.url);
+    if (info) {
+      track.info = info;
+      if (!track.title) {
+        track.title = info.video_details?.title || track.url;
+      }
+      return info;
+    }
+  } catch (error) {
+    logger.debug("yt-dlp metadata lookup failed.", { url: track.url, error });
+  }
+  return null;
+}
+
 async function getTrackInfo(track) {
   if (track.info) {
     if (!track.title) {
@@ -47,65 +90,32 @@ async function getTrackInfo(track) {
     throw new Error("Missing track URL");
   }
 
-  try {
-    const info = await play.video_basic_info(track.url);
-    track.info = info;
+  const ytDlpInfo = await tryGetInfoWithYtDlp(track);
+  if (ytDlpInfo) return ytDlpInfo;
 
-    if (!track.title) {
-      track.title = info.video_details?.title || track.url;
-    }
-
-    return info;
-  } catch (error) {
-    let fallbackInfo = null;
+  const allowPlayDlInfo = String(process.env.PLAYDL_INFO || "").toLowerCase();
+  if (allowPlayDlInfo === "1" || allowPlayDlInfo === "true") {
     try {
-      const data = await getInfoWithYtDlp(track.url);
-      if (data) {
-        const thumbnails = Array.isArray(data.thumbnails)
-          ? data.thumbnails
-              .map((thumb) => ({
-                url: thumb?.url,
-                width: thumb?.width,
-                height: thumb?.height,
-              }))
-              .filter((thumb) => thumb.url)
-          : [];
-        if (!thumbnails.length && data.thumbnail) {
-          thumbnails.push({ url: data.thumbnail });
-        }
-        fallbackInfo = {
-          video_details: {
-            title: data.title || track.url,
-            url: data.webpage_url || data.original_url || track.url,
-            durationInSec: Number.isFinite(data.duration) ? data.duration : null,
-            thumbnails,
-          },
-        };
+      const info = await play.video_basic_info(track.url);
+      track.info = info;
+
+      if (!track.title) {
+        track.title = info.video_details?.title || track.url;
       }
-    } catch (fallbackError) {
+
+      return info;
+    } catch (error) {
       logger.warn("Failed fetching track info, continuing without metadata.", {
         url: track.url,
         error,
       });
-      logger.debug("yt-dlp metadata fallback failed.", {
-        url: track.url,
-        error: fallbackError,
-      });
     }
-
-    if (fallbackInfo) {
-      track.info = fallbackInfo;
-      if (!track.title) {
-        track.title = fallbackInfo.video_details?.title || track.url;
-      }
-      return fallbackInfo;
-    }
-
-    if (!track.title) {
-      track.title = track.url;
-    }
-    return null;
   }
+
+  if (!track.title) {
+    track.title = track.url;
+  }
+  return null;
 }
 
 function ensureValidTrackUrl(track) {
