@@ -6,7 +6,7 @@ const {
 } = require("@discordjs/voice");
 const play = require("play-dl");
 const { cleanupGuild, connectToVoice, getGuildState } = require("./voice");
-const { streamWithYtDlp } = require("./ytdlp");
+const { getInfoWithYtDlp, streamWithYtDlp } = require("./ytdlp");
 const logger = require("../utils/logger");
 const {
   saveQueueState,
@@ -57,10 +57,50 @@ async function getTrackInfo(track) {
 
     return info;
   } catch (error) {
-    logger.warn("Failed fetching track info, continuing without metadata.", {
-      url: track.url,
-      error,
-    });
+    let fallbackInfo = null;
+    try {
+      const data = await getInfoWithYtDlp(track.url);
+      if (data) {
+        const thumbnails = Array.isArray(data.thumbnails)
+          ? data.thumbnails
+              .map((thumb) => ({
+                url: thumb?.url,
+                width: thumb?.width,
+                height: thumb?.height,
+              }))
+              .filter((thumb) => thumb.url)
+          : [];
+        if (!thumbnails.length && data.thumbnail) {
+          thumbnails.push({ url: data.thumbnail });
+        }
+        fallbackInfo = {
+          video_details: {
+            title: data.title || track.url,
+            url: data.webpage_url || data.original_url || track.url,
+            durationInSec: Number.isFinite(data.duration) ? data.duration : null,
+            thumbnails,
+          },
+        };
+      }
+    } catch (fallbackError) {
+      logger.warn("Failed fetching track info, continuing without metadata.", {
+        url: track.url,
+        error,
+      });
+      logger.debug("yt-dlp metadata fallback failed.", {
+        url: track.url,
+        error: fallbackError,
+      });
+    }
+
+    if (fallbackInfo) {
+      track.info = fallbackInfo;
+      if (!track.title) {
+        track.title = fallbackInfo.video_details?.title || track.url;
+      }
+      return fallbackInfo;
+    }
+
     if (!track.title) {
       track.title = track.url;
     }

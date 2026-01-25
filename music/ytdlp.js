@@ -156,7 +156,58 @@ async function searchWithYtDlp(query, limit = 5) {
   });
 }
 
+async function getInfoWithYtDlp(url) {
+  if (!url) return null;
+  const binary = await ensureBinary();
+  const args = [
+    url,
+    "--no-playlist",
+    "--skip-download",
+    "--dump-json",
+    "--no-warnings",
+    "--no-progress",
+    "-q",
+  ];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const wrapped = new Error("YTDLP_INFO_FAILED");
+        wrapped.cause = new Error(stderr || `exit_${code}`);
+        reject(wrapped);
+        return;
+      }
+
+      try {
+        const data = JSON.parse(stdout.trim());
+        resolve(data);
+      } catch (error) {
+        const wrapped = new Error("YTDLP_INFO_INVALID");
+        wrapped.cause = error;
+        reject(wrapped);
+      }
+    });
+  });
+}
+
 module.exports = {
+  getInfoWithYtDlp,
   searchWithYtDlp,
   streamWithYtDlp,
 };
