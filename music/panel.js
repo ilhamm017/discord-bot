@@ -8,6 +8,8 @@ const {
 } = require("discord.js");
 const logger = require("../utils/logger");
 
+const QUEUE_PAGE_SIZE = 25;
+
 function formatDuration(totalSeconds) {
   const seconds = Number(totalSeconds);
   if (!Number.isFinite(seconds) || seconds < 0) return "-";
@@ -88,12 +90,37 @@ function truncateText(value, maxLength) {
   return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
-function buildQueueLines(queue, currentIndex, maxItems) {
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getQueuePagination(queue, currentIndex, page) {
+  const startBase = Math.max(0, currentIndex + 1);
+  const totalUpcoming = Math.max(0, queue.length - startBase);
+  if (totalUpcoming <= 0) {
+    return {
+      page: 0,
+      totalPages: 0,
+      startIndex: startBase,
+    };
+  }
+
+  const totalPages = Math.max(1, Math.ceil(totalUpcoming / QUEUE_PAGE_SIZE));
+  const safePage = clampNumber(
+    Number.isInteger(page) ? page : 0,
+    0,
+    totalPages - 1
+  );
+  const startIndex = startBase + safePage * QUEUE_PAGE_SIZE;
+  return { page: safePage, totalPages, startIndex };
+}
+
+function buildQueueLines(queue, startIndex, maxItems, currentIndex) {
   if (!Array.isArray(queue) || queue.length === 0) return "-";
 
   const lines = [];
   const total = queue.length;
-  const start = Math.max(0, currentIndex);
+  const start = Math.max(0, startIndex);
 
   for (let i = start; i < total && lines.length < maxItems; i += 1) {
     const track = queue[i];
@@ -114,15 +141,26 @@ function buildQueueLines(queue, currentIndex, maxItems) {
   return lines.join("\n");
 }
 
-function buildQueueSelect(queue, currentIndex) {
-  if (!Array.isArray(queue) || queue.length <= 1) return null;
+function buildQueueSelect(queue, currentIndex, page) {
+  if (!Array.isArray(queue) || queue.length <= 1) {
+    return { menu: null, pagination: { page: 0, totalPages: 0, startIndex: 0 } };
+  }
 
-  const start = currentIndex >= 0 ? currentIndex + 1 : 0;
-  if (start >= queue.length) return null;
-  const slice = queue.slice(start, start + 25);
+  const pagination = getQueuePagination(queue, currentIndex, page);
+  if (pagination.totalPages === 0) {
+    return { menu: null, pagination };
+  }
+
+  const slice = queue.slice(
+    pagination.startIndex,
+    pagination.startIndex + QUEUE_PAGE_SIZE
+  );
+  if (slice.length === 0) {
+    return { menu: null, pagination };
+  }
 
   const options = slice.map((track, offset) => {
-    const index = start + offset;
+    const index = pagination.startIndex + offset;
     const title = truncateText(track?.title || track?.url || "-", 90);
     const label = `${index + 1}. ${title}`;
     return {
@@ -131,12 +169,16 @@ function buildQueueSelect(queue, currentIndex) {
     };
   });
 
-  if (options.length === 0) return null;
+  if (options.length === 0) {
+    return { menu: null, pagination };
+  }
 
-  return new StringSelectMenuBuilder()
+  const menu = new StringSelectMenuBuilder()
     .setCustomId("music_select")
     .setPlaceholder("Pilih lagu dari antrian")
     .addOptions(options);
+
+  return { menu, pagination };
 }
 
 function buildControlPanel(state) {
@@ -158,6 +200,16 @@ function buildControlPanel(state) {
     : currentTrack?.requestedByTag || currentTrack?.requestedBy || "-";
   const statusLabel = getStatusLabel(status);
   const repeatMode = state?.repeatMode || "off";
+  const queuePage = typeof state?.queuePage === "number" ? state.queuePage : 0;
+  const queueResult = buildQueueSelect(queue, currentIndex, queuePage);
+  const pagination = queueResult?.pagination || {
+    page: 0,
+    totalPages: 0,
+    startIndex: Math.max(0, currentIndex),
+  };
+  if (state) {
+    state.queuePage = pagination.page;
+  }
 
   const embed = new EmbedBuilder()
     .setTitle("Now Playing")
@@ -171,12 +223,25 @@ function buildControlPanel(state) {
       { name: "Repeat", value: getRepeatLabel(repeatMode), inline: true },
       {
         name: "Queue List",
-        value: buildQueueLines(queue, currentIndex, 10),
+        value: buildQueueLines(
+          queue,
+          pagination.totalPages > 0
+            ? pagination.startIndex
+            : Math.max(0, currentIndex),
+          10,
+          currentIndex
+        ),
       }
     );
 
   if (currentTrack?.url) {
     embed.setURL(currentTrack.url);
+  }
+
+  if (pagination.totalPages > 1) {
+    embed.setFooter({
+      text: `Queue Page ${pagination.page + 1}/${pagination.totalPages}`,
+    });
   }
 
   const thumbnail = getThumbnailUrl(currentTrack);
@@ -255,9 +320,24 @@ function buildControlPanel(state) {
   );
 
   const components = [row1, row2, row3];
-  const selectMenu = buildQueueSelect(queue, currentIndex);
-  if (selectMenu) {
-    components.push(new ActionRowBuilder().addComponents(selectMenu));
+  if (pagination.totalPages > 1) {
+    const queueNav = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("music_queue_prev")
+        .setLabel("Queue Prev")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(pagination.page <= 0),
+      new ButtonBuilder()
+        .setCustomId("music_queue_next")
+        .setLabel("Queue Next")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(pagination.page >= pagination.totalPages - 1)
+    );
+    components.push(queueNav);
+  }
+
+  if (queueResult?.menu) {
+    components.push(new ActionRowBuilder().addComponents(queueResult.menu));
   }
 
   return { embeds: [embed], components };

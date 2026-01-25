@@ -1,6 +1,7 @@
 const play = require("play-dl");
 const logger = require("./logger");
 const { getSpotifyCache, saveSpotifyCache } = require("../storage/db");
+const { searchWithYtDlp } = require("../music/ytdlp");
 
 let config = {};
 try {
@@ -266,12 +267,23 @@ async function resolveSpotifyTrackToYoutube(track) {
   const query = `${track.artists.join(" ")} - ${track.name}`.trim();
   if (!query) return null;
 
-  let results;
+  let results = [];
   try {
     results = await play.search(query, { limit: 5 });
   } catch (error) {
-    logger.warn("Spotify search on YouTube failed.", error);
-    return null;
+    logger.debug(
+      "Spotify search on YouTube failed, trying yt-dlp fallback.",
+      error
+    );
+  }
+
+  if (!Array.isArray(results) || results.length === 0) {
+    try {
+      results = await searchWithYtDlp(query, 5);
+    } catch (error) {
+      logger.warn("Spotify search fallback failed.", error);
+      return null;
+    }
   }
 
   const best = pickBestResult(results, track.durationMs);

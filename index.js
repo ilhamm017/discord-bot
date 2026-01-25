@@ -79,7 +79,10 @@ client.on("interactionCreate", async (interaction) => {
       state.panelMessageId = interaction.message?.id || state.panelMessageId;
     }
 
-    if (action !== "refresh") {
+    const voiceRequired = !["refresh", "queue_prev", "queue_next"].includes(
+      action
+    );
+    if (voiceRequired) {
       const voiceChannel = interaction.member?.voice?.channel;
       if (!voiceChannel) {
         return interaction.reply({
@@ -171,6 +174,26 @@ client.on("interactionCreate", async (interaction) => {
         }
         case "refresh":
           break;
+        case "queue_prev": {
+          if (!state) {
+            actionError = "Tidak ada antrian.";
+            break;
+          }
+          const currentPage =
+            typeof state.queuePage === "number" ? state.queuePage : 0;
+          state.queuePage = Math.max(0, currentPage - 1);
+          break;
+        }
+        case "queue_next": {
+          if (!state) {
+            actionError = "Tidak ada antrian.";
+            break;
+          }
+          const currentPage =
+            typeof state.queuePage === "number" ? state.queuePage : 0;
+          state.queuePage = currentPage + 1;
+          break;
+        }
         default:
           actionError = "Kontrol tidak dikenal.";
           break;

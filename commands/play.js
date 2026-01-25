@@ -5,6 +5,7 @@ const { enqueueTrack, enqueueTracks, getState } = require("../music/queue");
 const logger = require("../utils/logger");
 const { updateControlPanel } = require("../music/panel");
 const { getFavoriteTracks } = require("../storage/db");
+const { searchWithYtDlp } = require("../music/ytdlp");
 const {
   parseSpotifyInput,
   isSpotifyConfigured,
@@ -467,13 +468,23 @@ module.exports = {
       try {
         youtubeResults = await play.search(query, { limit: YT_SEARCH_LIMIT });
       } catch (error) {
-        logger.error("Failed searching YouTube.", error);
+        logger.debug("YouTube search failed, trying yt-dlp fallback.", error);
+      }
+
+      if (!Array.isArray(youtubeResults) || youtubeResults.length === 0) {
+        try {
+          youtubeResults = await searchWithYtDlp(query, YT_SEARCH_LIMIT);
+        } catch (error) {
+          logger.warn("YouTube search fallback failed.", error);
+        }
       }
 
       const youtubeItems = (Array.isArray(youtubeResults) ? youtubeResults : [])
         .map((video) => {
           const videoUrl =
-            video?.url || (video?.id ? `https://www.youtube.com/watch?v=${video.id}` : null);
+            video?.url ||
+            video?.webpage_url ||
+            (video?.id ? `https://www.youtube.com/watch?v=${video.id}` : null);
           if (!videoUrl) return null;
           return {
             source: "youtube",

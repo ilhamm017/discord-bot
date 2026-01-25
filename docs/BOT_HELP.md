@@ -28,3 +28,4 @@ Catatan:
 - Spotify butuh `spotify_client_id` + `spotify_client_secret` di config.json.
 - AI chat bisa jawab tanpa prefix kalau kamu reply ke pesan Yova.
 - Saat cari judul, Yova akan menampilkan daftar hasil yang bisa dipilih.
+- Untuk antrian panjang, gunakan tombol Queue Prev/Next di panel kontrol.

@@ -111,7 +111,7 @@ Kontrol tombol:
 - Repeat playlist (loop all)
 - Refresh panel
 
-Daftar antrian dapat dipilih untuk memutar nomor tertentu.
+Daftar antrian dapat dipilih untuk memutar nomor tertentu. Jika antrian panjang, gunakan tombol Queue Prev/Next untuk pindah halaman.
 
 ## Cara kerja singkat
 1. **Parsing perintah**: `index.js` membaca pesan yang diawali prefix.

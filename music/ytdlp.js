@@ -91,6 +91,72 @@ async function streamWithYtDlp(url) {
   }
 }
 
+async function searchWithYtDlp(query, limit = 5) {
+  if (!query) return [];
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 25));
+  const binary = await ensureBinary();
+  const args = [
+    `ytsearch${safeLimit}:${query}`,
+    "--no-playlist",
+    "--skip-download",
+    "--dump-json",
+    "--no-warnings",
+    "--no-progress",
+    "-q",
+  ];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const wrapped = new Error("YTDLP_SEARCH_FAILED");
+        wrapped.cause = new Error(stderr || `exit_${code}`);
+        reject(wrapped);
+        return;
+      }
+
+      const results = [];
+      const lines = stdout.split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        try {
+          const item = JSON.parse(line);
+          if (!item) continue;
+          const url =
+            item.webpage_url ||
+            item.url ||
+            (item.id ? `https://www.youtube.com/watch?v=${item.id}` : null);
+          if (!url) continue;
+          results.push({
+            id: item.id,
+            url,
+            title: item.title || url,
+            duration: Number.isFinite(item.duration) ? item.duration : null,
+          });
+        } catch (error) {
+          continue;
+        }
+      }
+      resolve(results);
+    });
+  });
+}
+
 module.exports = {
+  searchWithYtDlp,
   streamWithYtDlp,
 };

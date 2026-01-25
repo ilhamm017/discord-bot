@@ -6,8 +6,10 @@ const {
   clearUserCallName,
   addUserMemory,
   listUserMemory,
+  loadQueueState,
 } = require("../storage/db");
 const { answerBotQuestion, isBotQuestion } = require("./bot_docs");
+const { getState } = require("../music/queue");
 let config = {};
 
 try {
@@ -385,6 +387,100 @@ function describeMember(member) {
   return `${name} (${member.user?.id || "unknown"}, ${roleText})`;
 }
 
+function formatRepeatMode(mode) {
+  switch (mode) {
+    case "track":
+      return "track";
+    case "all":
+      return "all";
+    default:
+      return "off";
+  }
+}
+
+function formatTrackSummary(track, index, total) {
+  if (!track) return "-";
+  const title = track?.title || track?.url || "-";
+  const requester =
+    track?.requestedByTag || track?.requestedBy || track?.requestedById || "-";
+  const pos =
+    Number.isInteger(index) && total > 0 ? `${index + 1}/${total}` : "-";
+  return `${title} (pos ${pos}, req ${requester})`;
+}
+
+function buildQueuePreview(queue, startIndex, limit = 3) {
+  if (!Array.isArray(queue) || queue.length === 0) return "-";
+  const start = Math.max(0, startIndex);
+  const list = [];
+  for (let i = start; i < queue.length && list.length < limit; i += 1) {
+    const track = queue[i];
+    const title = track?.title || track?.url || "-";
+    list.push(`#${i + 1} ${title}`);
+  }
+  return list.length ? list.join(" | ") : "-";
+}
+
+function buildMusicContext(message) {
+  if (!message.guild) return "Music: (tidak tersedia)";
+
+  const guild = message.guild;
+  const guildId = guild.id;
+  const live = getState(guildId);
+  if (live && Array.isArray(live.queue) && live.queue.length > 0) {
+    const queue = live.queue;
+    const currentIndex = Number.isInteger(live.currentIndex)
+      ? live.currentIndex
+      : -1;
+    const currentTrack =
+      currentIndex >= 0 && currentIndex < queue.length
+        ? queue[currentIndex]
+        : null;
+    const nextIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+    const voiceChannel = live.channelId
+      ? guild.channels.cache.get(live.channelId)
+      : null;
+    const voiceLabel = voiceChannel?.name
+      ? `#${voiceChannel.name}`
+      : live.channelId || "-";
+    const status = live.player?.state?.status || "unknown";
+
+    return [
+      "Music: active",
+      `Voice: ${voiceLabel}`,
+      `Status: ${status}`,
+      `Now playing: ${formatTrackSummary(currentTrack, currentIndex, queue.length)}`,
+      `Queue length: ${queue.length}`,
+      `Next up: ${buildQueuePreview(queue, nextIndex, 3)}`,
+      `Repeat: ${formatRepeatMode(live.repeatMode)}`,
+    ].join("\n");
+  }
+
+  const stored = loadQueueState(guildId);
+  if (stored && Array.isArray(stored.queue) && stored.queue.length > 0) {
+    const currentIndex = Number.isInteger(stored.currentIndex)
+      ? stored.currentIndex
+      : -1;
+    const currentTrack =
+      currentIndex >= 0 && currentIndex < stored.queue.length
+        ? stored.queue[currentIndex]
+        : null;
+    const nextIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+    return [
+      "Music: queued (persisted)",
+      `Now playing: ${formatTrackSummary(
+        currentTrack,
+        currentIndex,
+        stored.queue.length
+      )}`,
+      `Queue length: ${stored.queue.length}`,
+      `Next up: ${buildQueuePreview(stored.queue, nextIndex, 3)}`,
+      `Repeat: ${formatRepeatMode(stored.repeatMode)}`,
+    ].join("\n");
+  }
+
+  return "Music: idle";
+}
+
 async function ensureMemberCache(guild) {
   if (!guild?.members?.fetch) return;
   const cacheSize = guild.members?.cache?.size || 0;
@@ -448,6 +544,7 @@ function buildServerContext(message) {
     `Mentioned: ${mentionedInfo}`,
     `Members sample (cache): ${knownMembers.length ? knownMembers.join(" | ") : "-"}`,
     "Catatan: data anggota bisa tidak lengkap (hanya cache).",
+    buildMusicContext(message),
   ].join("\n");
 }
 
@@ -506,6 +603,7 @@ async function generateAiReply(message, prompt, options = {}) {
     "Jangan simpan dendam; fokus ke pesan terakhir. " +
     "Kalau user minta maaf/udahan debat, jadi baik dan akhiri debat. " +
     `${tone.hint} ` +
+    "Jika ditanya musik yang sedang diputar atau status voice, gunakan konteks musik yang tersedia. " +
     "Kalau tidak tahu, boleh kasih tebakan ringan atau bilang belum tahu, lalu tambahkan pertanyaan balik yang nyambung. " +
     (callName
       ? `Jika menyebut penanya, gunakan panggilan "${callName}" (bukan "bro"). `
@@ -620,7 +718,7 @@ async function handleAiRequest(message, prompt) {
     "Jika pengguna minta cek member/anggota server (awal/baru/daftar/jumlah), gunakan command member. " +
     "Jika pengguna minta ringkas/rangkum channel, gunakan command ringkas. " +
     "Jika pengguna bertanya/bercakap-cakap, gunakan type reply dan tulis jawaban. " +
-    "Jika pengguna meminta info server, jawab dengan type reply berdasarkan info server yang tersedia. " +
+    "Jika pengguna meminta info server atau musik yang sedang diputar, jawab dengan type reply berdasarkan info yang tersedia. " +
     "Jika data tidak tersedia, katakan tidak punya akses. " +
     "Persona: chibi/tsundere/kamidere vibe yang imut tapi sombong dan lucu; kadang pamer diri. " +
     "Jangan menyebut diri anak/bocil/loli, tetap dewasa. " +
