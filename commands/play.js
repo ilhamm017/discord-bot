@@ -3,6 +3,43 @@ const play = require("play-dl");
 const { enqueueTrack, enqueueTracks, getState } = require("../music/queue");
 const logger = require("../utils/logger");
 const { updateControlPanel } = require("../music/panel");
+const { getFavoriteTracks } = require("../storage/db");
+
+const FAVORITES_MIN_PLAYS = 5;
+const FAVORITES_LIMIT = 20;
+const MENTION_REGEX = /<@!?\d+>/g;
+
+function resolveTargetVoiceChannel(message) {
+  const mentionedMember = message.mentions?.members
+    ? message.mentions.members.find((member) => !member.user?.bot)
+    : null;
+
+  if (mentionedMember) {
+    const targetChannel = mentionedMember.voice?.channel;
+    if (!targetChannel) {
+      return {
+        error: "Target belum ada di voice channel.",
+      };
+    }
+    return { channel: targetChannel, targetMember: mentionedMember };
+  }
+
+  const memberChannel = message.member?.voice?.channel;
+  if (!memberChannel) {
+    return { error: "Kamu harus join voice channel dulu atau sebutkan target." };
+  }
+
+  return { channel: memberChannel, targetMember: null };
+}
+
+function stripTargetTokens(query) {
+  if (!query) return "";
+  return query
+    .replace(MENTION_REGEX, " ")
+    .replace(/\b(untuk|buat)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 module.exports = {
   name: "play",
@@ -12,15 +49,87 @@ module.exports = {
       return message.reply("Perintah ini hanya bisa dipakai di server.");
     }
 
-    const voiceChannel = message.member?.voice?.channel;
-    if (!voiceChannel) {
-      return message.reply("Kamu harus join voice channel dulu.");
+    const target = resolveTargetVoiceChannel(message);
+    if (target.error) {
+      return message.reply(target.error);
     }
+    const voiceChannel = target.channel;
 
-    const query = args.join(" ").trim();
+    const rawQuery = args.join(" ").trim();
+    const query = stripTargetTokens(rawQuery);
     if (!query) {
       return message.reply(
         "Masukkan URL atau judul. Contoh: yova play <url/judul>"
+      );
+    }
+
+    if (query.toLowerCase() === "kesukaanku") {
+      const favorites = getFavoriteTracks(message.author.id, {
+        minPlays: FAVORITES_MIN_PLAYS,
+        limit: FAVORITES_LIMIT,
+      });
+
+      if (!favorites.length) {
+        return message.reply(
+          `Belum ada lagu favorit (minimal ${FAVORITES_MIN_PLAYS}x diputar).`
+        );
+      }
+
+      const tracks = favorites.map((item) => ({
+        url: item.url,
+        title: item.title || item.url,
+        requestedBy: message.author.tag,
+        requestedById: message.author.id,
+        requestedByTag: message.author.tag,
+      }));
+
+      let result;
+      try {
+        result = await enqueueTracks(voiceChannel, tracks, {
+          textChannelId: message.channel.id,
+        });
+      } catch (error) {
+        logger.error("Queue error.", error);
+        const state = message.guild ? getState(message.guild.id) : null;
+        const status = state?.player?.state?.status;
+        if (
+          status === AudioPlayerStatus.Playing ||
+          status === AudioPlayerStatus.Buffering
+        ) {
+          return;
+        }
+        if (error?.message === "STREAM_NEEDS_FFMPEG") {
+          return message.reply(
+            "Format audio butuh FFmpeg. Install FFmpeg atau gunakan link lain."
+          );
+        }
+        if (error?.message === "STREAM_FALLBACK_FAILED") {
+          return message.reply(
+            "Gagal memutar audio (fallback yt-dlp). Coba lagi nanti."
+          );
+        }
+        if (error?.message === "YTDLP_DOWNLOAD_FAILED") {
+          return message.reply(
+            "Gagal mengunduh yt-dlp. Cek koneksi atau coba lagi nanti."
+          );
+        }
+        return message.reply("Gagal memutar audio.");
+      }
+
+      try {
+        await updateControlPanel(message.client, result.state);
+      } catch (error) {
+        logger.warn("Failed updating control panel.", error);
+      }
+
+      if (result.started) {
+        return message.reply(
+          `Memutar kesukaanku (${tracks.length} lagu).`
+        );
+      }
+
+      return message.reply(
+        `Kesukaanku ditambahkan (${tracks.length} lagu), mulai antrian #${result.startPosition}.`
       );
     }
     let url = query;
@@ -128,8 +237,6 @@ module.exports = {
       } catch (error) {
         logger.warn("Failed getting YouTube info, continuing.", error);
       }
-    } else if (validation === "playlist") {
-      return message.reply("Playlist belum didukung. Gunakan URL video atau judul.");
     } else {
       let results;
       try {

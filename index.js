@@ -1,8 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 const { Client, Collection, GatewayIntentBits } = require("discord.js");
-const { token, prefix = "!" } = require("./config.json");
+const config = require("./config.json");
+const { token, prefix = "!" } = config;
 const logger = require("./utils/logger");
+const { initDatabase } = require("./storage/db");
+const { handleAiRequest } = require("./utils/ai_chat");
 const {
   getState,
   jumpToIndex,
@@ -17,9 +20,12 @@ const {
 } = require("./music/queue");
 const { buildControlPanel, updateControlPanel } = require("./music/panel");
 
+initDatabase();
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
@@ -269,8 +275,59 @@ client.on("messageCreate", async (message) => {
 
   const content = message.content.trim();
   const prefixLower = prefix.toLowerCase();
+  const runAiPrompt = async (prompt, source = "chat") => {
+    if (!prompt) return;
+    try {
+      logger.info("AI chat request", {
+        authorId: message.author.id,
+        channelId: message.channel.id,
+        guildId: message.guild?.id || null,
+        source,
+      });
+      const aiResult = await handleAiRequest(message, prompt);
+      if (aiResult?.type === "command" && aiResult.name) {
+        const aiCommand = client.commands.get(aiResult.name);
+        if (!aiCommand) {
+          await message.reply("Perintah itu belum tersedia.");
+          return;
+        }
+        logger.info("AI routed command", {
+          command: aiResult.name,
+          authorId: message.author.id,
+          channelId: message.channel.id,
+          guildId: message.guild?.id || null,
+          source,
+        });
+        await aiCommand.execute(message, aiResult.args || []);
+        return;
+      }
 
-  if (!content.toLowerCase().startsWith(prefixLower)) return;
+      const reply = aiResult?.message?.trim();
+      if (reply) {
+        await message.reply(reply);
+      } else {
+        await message.reply("Nggak paham maksudnya.");
+      }
+    } catch (error) {
+      logger.error("AI chat error", error);
+      await message.reply("Gagal menjawab dengan AI. Coba lagi nanti.");
+    }
+  };
+
+  const startsWithPrefix = content.toLowerCase().startsWith(prefixLower);
+  if (!startsWithPrefix) {
+    if (message.reference?.messageId && content) {
+      try {
+        const referenced = await message.fetchReference();
+        if (referenced?.author?.id === client.user.id) {
+          await runAiPrompt(content, "reply");
+        }
+      } catch (error) {
+        logger.warn("Failed to resolve reply reference.", error);
+      }
+    }
+    return;
+  }
 
   const rest = content.slice(prefix.length);
   if (rest.length) {
@@ -283,7 +340,11 @@ client.on("messageCreate", async (message) => {
   if (!commandName) return;
 
   const command = client.commands.get(commandName);
-  if (!command) return;
+  if (!command) {
+    const prompt = rest.trim();
+    await runAiPrompt(prompt, "unknown_command");
+    return;
+  }
 
   try {
     await command.execute(message, args);

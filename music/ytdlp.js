@@ -1,14 +1,13 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { Readable } = require("stream");
+const { PassThrough } = require("stream");
+const { spawn } = require("child_process");
 const YTDlpWrap = require("yt-dlp-wrap").default;
 
 const dataDir = path.join(__dirname, "..", ".data");
 const binaryName = os.platform() === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const binaryPath = path.join(dataDir, binaryName);
-
-let ytDlpWrapPromise;
 
 async function ensureBinary() {
   if (fs.existsSync(binaryPath)) return binaryPath;
@@ -29,19 +28,8 @@ async function ensureBinary() {
   return binaryPath;
 }
 
-async function getYtDlpWrap() {
-  if (!ytDlpWrapPromise) {
-    ytDlpWrapPromise = (async () => {
-      const binary = await ensureBinary();
-      return new YTDlpWrap(binary);
-    })();
-  }
-
-  return ytDlpWrapPromise;
-}
-
-async function getStreamUrl(url) {
-  const ytDlpWrap = await getYtDlpWrap();
+async function streamWithYtDlp(url) {
+  const binary = await ensureBinary();
   const args = [
     url,
     "--no-playlist",
@@ -50,49 +38,57 @@ async function getStreamUrl(url) {
     "-q",
     "-f",
     "bestaudio[acodec=opus]/bestaudio",
-    "-g",
+    "--retries",
+    "3",
+    "--fragment-retries",
+    "3",
+    "--socket-timeout",
+    "10",
+    "-o",
+    "-",
   ];
 
-  let stdout;
   try {
-    stdout = await ytDlpWrap.execPromise(args);
+    const stream = new PassThrough();
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    let closed = false;
+
+    child.stdout.pipe(stream);
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      if (closed) return;
+      closed = true;
+      stream.destroy(error);
+    });
+
+    child.on("close", (code) => {
+      if (closed) return;
+      closed = true;
+      if (code === 0) {
+        stream.end();
+      } else {
+        const wrapped = new Error("YTDLP_EXEC_FAILED");
+        wrapped.cause = new Error(stderr || `exit_${code}`);
+        stream.destroy(wrapped);
+      }
+    });
+
+    stream.on("close", () => {
+      if (!child.killed) {
+        child.kill();
+      }
+    });
+
+    return stream;
   } catch (error) {
     const wrapped = new Error("YTDLP_EXEC_FAILED");
     wrapped.cause = error;
     throw wrapped;
   }
-
-  const line = String(stdout)
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .find(Boolean);
-
-  if (!line) {
-    throw new Error("YTDLP_NO_URL");
-  }
-
-  return line;
-}
-
-async function streamWithYtDlp(url) {
-  const streamUrl = await getStreamUrl(url);
-
-  let response;
-  try {
-    response = await fetch(streamUrl);
-  } catch (error) {
-    const wrapped = new Error("YTDLP_FETCH_FAILED");
-    wrapped.cause = error;
-    throw wrapped;
-  }
-
-  if (!response.ok || !response.body) {
-    const wrapped = new Error("YTDLP_FETCH_FAILED");
-    wrapped.cause = new Error(`HTTP_${response.status}`);
-    throw wrapped;
-  }
-
-  return Readable.fromWeb(response.body);
 }
 
 module.exports = {

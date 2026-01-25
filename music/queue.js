@@ -8,11 +8,22 @@ const play = require("play-dl");
 const { cleanupGuild, connectToVoice, getGuildState } = require("./voice");
 const { streamWithYtDlp } = require("./ytdlp");
 const logger = require("../utils/logger");
+const {
+  saveQueueState,
+  loadQueueState,
+  clearQueueState,
+  recordPlay,
+} = require("../storage/db");
 
 let panelUpdater = null;
 
 function setPanelUpdater(updater) {
   panelUpdater = typeof updater === "function" ? updater : null;
+}
+
+function persistQueueState(state) {
+  if (!state?.guildId) return;
+  saveQueueState(state.guildId, state);
 }
 
 function notifyPanel(state, reason) {
@@ -106,6 +117,12 @@ async function playIndexOnce(state, index) {
 
   state.currentIndex = index;
   state.player.play(resource);
+  persistQueueState(state);
+  recordPlay({
+    userId: track?.requestedById,
+    url: track?.url,
+    title: track?.title,
+  });
   notifyPanel(state, "play");
   return track;
 }
@@ -173,6 +190,7 @@ async function playPrevious(state) {
 }
 
 function ensureQueueState(state, guildId) {
+  if (!state.guildId && guildId) state.guildId = guildId;
   if (!Array.isArray(state.queue)) state.queue = [];
   if (typeof state.currentIndex !== "number") state.currentIndex = -1;
   if (typeof state.playToken !== "number") state.playToken = 0;
@@ -249,6 +267,7 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
   const startPosition = state.queue.length + 1;
   state.queue.push(...entries);
   const added = entries.length;
+  persistQueueState(state);
 
   let started = false;
   if (state.player.state.status === AudioPlayerStatus.Idle) {
@@ -266,6 +285,34 @@ async function enqueueTrack(voiceChannel, track, options = {}) {
     position: result.startPosition,
     started: result.started,
   };
+}
+
+async function restoreQueue(voiceChannel, options = {}) {
+  const guildId = voiceChannel.guild.id;
+  const persisted = loadQueueState(guildId);
+  if (!persisted || !Array.isArray(persisted.queue) || persisted.queue.length === 0) {
+    return { restored: false, state: null, queueLength: 0 };
+  }
+
+  const state = await connectToVoice(voiceChannel);
+  ensureQueueState(state, guildId);
+
+  if (options.textChannelId) {
+    if (state.panelChannelId && state.panelChannelId !== options.textChannelId) {
+      state.panelMessageId = null;
+    }
+    state.panelChannelId = options.textChannelId;
+  }
+
+  state.queue = persisted.queue;
+  state.currentIndex = -1;
+  state.repeatMode = persisted.repeatMode || "off";
+  state.playToken = (state.playToken || 0) + 1;
+
+  persistQueueState(state);
+  notifyPanel(state, "restore");
+
+  return { restored: true, state, queueLength: state.queue.length };
 }
 
 async function skipTrack(guildId) {
@@ -316,6 +363,7 @@ function shuffleQueue(guildId) {
   }
 
   state.queue = state.queue.slice(0, start).concat(upcoming);
+  persistQueueState(state);
   notifyPanel(state, "shuffle");
   return true;
 }
@@ -326,6 +374,7 @@ function setRepeatMode(guildId, mode) {
 
   const normalized = mode === "track" || mode === "all" ? mode : "off";
   state.repeatMode = normalized;
+  persistQueueState(state);
   notifyPanel(state, "repeat");
   return normalized;
 }
@@ -362,11 +411,13 @@ function stopPlayback(guildId) {
   state.playToken = (state.playToken || 0) + 1;
 
   state.player.stop(true);
+  clearQueueState(guildId);
   notifyPanel(state, "stop");
   return true;
 }
 
 function leaveVoice(guildId) {
+  clearQueueState(guildId);
   return cleanupGuild(guildId);
 }
 
@@ -383,6 +434,7 @@ module.exports = {
   setRepeatMode,
   setPanelUpdater,
   leaveVoice,
+  restoreQueue,
   previousTrack,
   skipTrack,
   stopPlayback,
