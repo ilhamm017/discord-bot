@@ -12,3 +12,4 @@ services:
       - ./config.json:/app/config.json:ro
       - ./logs:/app/logs
       - ./.data:/app/.data
+      - ./cookies.txt:/app/cookies.txt:ro
