@@ -44,7 +44,6 @@ Opsional:
 - `default_voice_channel`: nama atau ID voice channel default untuk perintah `join`.
 - `spotify_client_id`: Spotify Client ID (untuk resolve metadata).
 - `spotify_client_secret`: Spotify Client Secret.
-- `ytdlp_cookies_path`: path file cookies YouTube (untuk mengurangi "Sign in to confirm you’re not a bot").
 - `search_results_limit_youtube`: jumlah hasil YouTube saat cari judul.
 - `search_results_limit_spotify`: jumlah hasil Spotify saat cari judul.
 - `search_select_ttl_ms`: durasi menu pilihan hasil pencarian (ms).
@@ -79,10 +78,6 @@ docker compose up -d --build
 Data persisten:
 - `./.data` untuk SQLite dan yt-dlp cache
 - `./logs` untuk log harian
-
-Cookies YouTube (opsional):
-- Export cookies ke `cookies.txt`, mount ke container.
-- Set `ytdlp_cookies_path` ke `/app/cookies.txt`.
 
 Catatan: yt-dlp akan otomatis diunduh ke `.data/yt-dlp` saat pertama kali streaming.
 

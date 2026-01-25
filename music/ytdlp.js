@@ -5,13 +5,6 @@ const { PassThrough } = require("stream");
 const { spawn } = require("child_process");
 const YTDlpWrap = require("yt-dlp-wrap").default;
 
-let config = {};
-try {
-  config = require("../config.json");
-} catch (error) {
-  config = {};
-}
-
 const dataDir = path.join(__dirname, "..", ".data");
 const binaryName = os.platform() === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const binaryPath = path.join(dataDir, binaryName);
@@ -35,31 +28,10 @@ async function ensureBinary() {
   return binaryPath;
 }
 
-function getCookiesPath() {
-  const raw =
-    config.ytdlp_cookies_path ||
-    config.ytdlpCookiesPath ||
-    process.env.YTDLP_COOKIES_PATH;
-  if (!raw) return null;
-  const resolved = path.isAbsolute(raw)
-    ? raw
-    : path.resolve(process.cwd(), raw);
-  try {
-    const stat = fs.statSync(resolved);
-    if (!stat.isFile()) return null;
-    return resolved;
-  } catch (error) {
-    return null;
-  }
-}
-
 async function streamWithYtDlp(url) {
   const binary = await ensureBinary();
-  const cookiesPath = getCookiesPath();
-  const cookieArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
   const args = [
     url,
-    ...cookieArgs,
     "--no-playlist",
     "--no-warnings",
     "--no-progress",
@@ -123,11 +95,8 @@ async function searchWithYtDlp(query, limit = 5) {
   if (!query) return [];
   const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 25));
   const binary = await ensureBinary();
-  const cookiesPath = getCookiesPath();
-  const cookieArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
   const args = [
     `ytsearch${safeLimit}:${query}`,
-    ...cookieArgs,
     "--no-playlist",
     "--skip-download",
     "--dump-json",
@@ -190,11 +159,8 @@ async function searchWithYtDlp(query, limit = 5) {
 async function getInfoWithYtDlp(url) {
   if (!url) return null;
   const binary = await ensureBinary();
-  const cookiesPath = getCookiesPath();
-  const cookieArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
   const args = [
     url,
-    ...cookieArgs,
     "--no-playlist",
     "--skip-download",
     "--dump-json",
