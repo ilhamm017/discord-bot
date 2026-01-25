@@ -143,6 +143,7 @@ function mapSpotifyTrack(track) {
     id: track.id,
     name: track.name || track.title || "",
     artists,
+    url: track.external_urls?.spotify || null,
     durationMs: Number(track.duration_ms) || 0,
     isPlayable: track.is_playable !== false,
   };
@@ -186,6 +187,18 @@ async function getSpotifyAlbum(id) {
     .map((item) => mapSpotifyTrack(item))
     .filter((track) => track && track.isPlayable !== false);
   return { name: data?.name || "Album Spotify", tracks };
+}
+
+async function searchSpotifyTracks(query, limit = 5) {
+  if (!query) return [];
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 20));
+  const data = await spotifyRequest(
+    `/search?type=track&limit=${safeLimit}&q=${encodeURIComponent(query)}`
+  );
+  const items = Array.isArray(data?.tracks?.items) ? data.tracks.items : [];
+  return items
+    .map((item) => mapSpotifyTrack(item))
+    .filter((track) => track && track.isPlayable !== false);
 }
 
 function parseDurationToSeconds(raw) {
@@ -332,4 +345,6 @@ module.exports = {
   isSpotifyConfigured,
   fetchSpotifyCollection,
   resolveSpotifyTracks,
+  resolveSpotifyTrackToYoutube,
+  searchSpotifyTracks,
 };

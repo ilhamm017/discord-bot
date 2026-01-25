@@ -3,7 +3,7 @@
 Yova adalah bot Discord dengan fitur musik, panel kontrol, favorit lagu, dan AI (Groq) untuk chat maupun perintah yang lebih fleksibel.
 
 ## Fitur utama
-- Putar musik dari YouTube/YouTube Music (judul atau URL) + playlist.
+- Putar musik dari YouTube/YouTube Music (judul atau URL) + playlist. Pencarian judul menampilkan pilihan YT/Spotify.
 - Panel kontrol dengan tombol (prev/pause/next/stop/leave/shuffle/repeat/refresh) dan daftar antrian yang bisa dipilih.
 - Queue otomatis tersimpan ke SQLite agar tidak hilang saat crash, dengan restore manual.
 - Favorit global (1 server): lagu yang sering diputar naik ke atas dan bisa diputar lewat `yova play kesukaanku`.
@@ -44,6 +44,9 @@ Opsional:
 - `default_voice_channel`: nama atau ID voice channel default untuk perintah `join`.
 - `spotify_client_id`: Spotify Client ID (untuk resolve metadata).
 - `spotify_client_secret`: Spotify Client Secret.
+- `search_results_limit_youtube`: jumlah hasil YouTube saat cari judul.
+- `search_results_limit_spotify`: jumlah hasil Spotify saat cari judul.
+- `search_select_ttl_ms`: durasi menu pilihan hasil pencarian (ms).
 - `typing_delay_enabled`: aktifkan efek mengetik sebelum bot membalas.
 - `typing_delay_min_ms` / `typing_delay_max_ms`: rentang delay dasar efek mengetik.
 - `typing_delay_per_char_ms`: tambahan delay per karakter.
@@ -52,6 +55,9 @@ Opsional:
 - `ai_memory_ttl_days`: umur maksimal memori dalam hari (0 = tidak kedaluwarsa).
 - `guild_members_fetch_mode`: mode fetch member untuk AI context (`sample`, `full`, `off`).
 - `guild_members_fetch_cooldown_ms`: jeda fetch member agar tidak terlalu sering.
+- `channel_summary_message_limit`: jumlah pesan default untuk `ringkas`.
+- `channel_summary_message_max_limit`: batas maksimal pesan yang bisa diringkas.
+- `channel_summary_max_chars_per_message`: batas panjang per pesan untuk ringkasan.
 
 3. Pastikan intent Discord sudah aktif di Developer Portal:
 - Message Content Intent (untuk membaca pesan).
@@ -68,7 +74,7 @@ Catatan: yt-dlp akan otomatis diunduh ke `.data/yt-dlp` saat pertama kali stream
 Semua perintah memakai prefix dari `config.json` (contoh `yova`).
 
 ### Musik
-- `yova play <judul|url>`: putar lagu.
+- `yova play <judul|url>`: cari lagu dan pilih hasil (YT/Spotify), atau putar langsung jika URL.
 - `yova play <spotify url>`: putar lagu/playlist/album Spotify (dipetakan ke YouTube).
 - `yova play kesukaanku`: putar daftar favorit global (>= 5 kali diputar).
 - `yova join <nama_channel|@user|default>`: bot masuk ke voice channel.
@@ -89,6 +95,7 @@ Semua perintah memakai prefix dari `config.json` (contoh `yova`).
 - `yova panggil aku <nama>`: simpan panggilan untuk kamu (dipakai AI).
 - `yova <pesan bebas>`: AI chat atau AI merutekan ke perintah yang diizinkan.
 - `yova jelaskan dirimu`: tampilkan ringkasan fitur bot.
+- `yova ringkas [n]` / `yova rangkum [n]`: ringkas chat terbaru di channel.
 - `yova member awal|baru|daftar|jumlah [n]`: info member server.
 - `yova cek member ...`: alias untuk `member`.
 

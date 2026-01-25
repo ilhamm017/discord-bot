@@ -1,4 +1,5 @@
 const { AudioPlayerStatus } = require("@discordjs/voice");
+const { ActionRowBuilder, StringSelectMenuBuilder } = require("discord.js");
 const play = require("play-dl");
 const { enqueueTrack, enqueueTracks, getState } = require("../music/queue");
 const logger = require("../utils/logger");
@@ -9,12 +10,28 @@ const {
   isSpotifyConfigured,
   fetchSpotifyCollection,
   resolveSpotifyTracks,
+  searchSpotifyTracks,
 } = require("../utils/spotify");
+const { registerSearchSession } = require("../music/search");
+
+let config = {};
+try {
+  config = require("../config.json");
+} catch (error) {
+  config = {};
+}
 
 const FAVORITES_MIN_PLAYS = 5;
 const FAVORITES_LIMIT = 20;
 const MENTION_REGEX = /<@!?\d+>/g;
 const MENTION_TEST_REGEX = /<@!?\d+>/;
+const YT_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_youtube)
+  ? config.search_results_limit_youtube
+  : 5;
+const SPOTIFY_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_spotify)
+  ? config.search_results_limit_spotify
+  : 5;
+const SEARCH_OPTION_LIMIT = 25;
 
 function resolveTargetVoiceChannel(message) {
   const mentionedMember = message.mentions?.members
@@ -46,6 +63,62 @@ function stripTargetTokens(query, { hasMention } = {}) {
     cleaned = cleaned.replace(/\b(untuk|buat)\b/gi, " ");
   }
   return cleaned.replace(/\s+/g, " ").trim();
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || "");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function formatDuration(totalSeconds) {
+  const seconds = Number(totalSeconds);
+  if (!Number.isFinite(seconds) || seconds < 0) return "-";
+
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function getYoutubeDurationMs(result) {
+  if (!result) return null;
+  if (Number.isFinite(result.durationInSec)) {
+    return Math.round(result.durationInSec * 1000);
+  }
+  if (Number.isFinite(result.durationInSeconds)) {
+    return Math.round(result.durationInSeconds * 1000);
+  }
+  if (Number.isFinite(result.duration)) {
+    return Math.round(result.duration * 1000);
+  }
+  return null;
+}
+
+function buildSearchSelect(results) {
+  const options = results.slice(0, SEARCH_OPTION_LIMIT).map((item, index) => {
+    const prefix = item.source === "spotify" ? "SP" : "YT";
+    const label = truncateText(`${prefix}: ${item.title}`, 100);
+    const duration = item.durationMs
+      ? formatDuration(Math.round(item.durationMs / 1000))
+      : "-";
+    const descriptionBase =
+      item.source === "spotify"
+        ? `Spotify • ${item.artists?.join(", ") || "-"}`
+        : "YouTube";
+    const description = truncateText(`${descriptionBase} • ${duration}`, 100);
+    return {
+      label,
+      description,
+      value: String(index),
+    };
+  });
+
+  if (!options.length) return null;
+
+  return new StringSelectMenuBuilder()
+    .setCustomId("music_search")
+    .setPlaceholder("Pilih hasil pencarian")
+    .addOptions(options);
 }
 
 module.exports = {
@@ -390,21 +463,81 @@ module.exports = {
         logger.warn("Failed getting YouTube info, continuing.", error);
       }
     } else {
-      let results;
+      let youtubeResults = [];
       try {
-        results = await play.search(query, { limit: 1 });
+        youtubeResults = await play.search(query, { limit: YT_SEARCH_LIMIT });
       } catch (error) {
         logger.error("Failed searching YouTube.", error);
-        return message.reply("Gagal mencari video.");
       }
 
-      const video = results?.[0];
-      if (!video?.url) {
-        return message.reply("Tidak menemukan video untuk judul itu.");
+      const youtubeItems = (Array.isArray(youtubeResults) ? youtubeResults : [])
+        .map((video) => {
+          const videoUrl =
+            video?.url || (video?.id ? `https://www.youtube.com/watch?v=${video.id}` : null);
+          if (!videoUrl) return null;
+          return {
+            source: "youtube",
+            title: video?.title || videoUrl,
+            url: videoUrl,
+            durationMs: getYoutubeDurationMs(video),
+          };
+        })
+        .filter(Boolean);
+
+      let spotifyItems = [];
+      if (isSpotifyConfigured()) {
+        try {
+          const spotifyResults = await searchSpotifyTracks(
+            query,
+            SPOTIFY_SEARCH_LIMIT
+          );
+          spotifyItems = spotifyResults.map((track) => ({
+            source: "spotify",
+            title: track?.name || "Spotify Track",
+            artists: track?.artists || [],
+            durationMs: track?.durationMs || null,
+            spotify: {
+              id: track?.id,
+              name: track?.name,
+              artists: track?.artists || [],
+              durationMs: track?.durationMs || 0,
+            },
+            url: track?.url || null,
+          }));
+        } catch (error) {
+          logger.warn("Failed searching Spotify, continuing.", error);
+        }
       }
 
-      url = video.url;
-      title = video.title;
+      const combined = [...youtubeItems, ...spotifyItems].slice(
+        0,
+        SEARCH_OPTION_LIMIT
+      );
+
+      if (combined.length === 0) {
+        return message.reply("Tidak menemukan hasil untuk judul itu.");
+      }
+
+      const selectMenu = buildSearchSelect(combined);
+      if (!selectMenu) {
+        return message.reply("Tidak menemukan hasil untuk judul itu.");
+      }
+
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+      const targetLabel = voiceChannel?.id ? ` di <#${voiceChannel.id}>` : "";
+      const sent = await message.reply({
+        content: `Pilih hasil pencarian (YT/Spotify)${targetLabel}:`,
+        components: [row],
+      });
+
+      registerSearchSession(sent.id, {
+        requesterId: message.author.id,
+        voiceChannelId: voiceChannel?.id || null,
+        textChannelId: message.channel.id,
+        results: combined,
+      });
+
+      return;
     }
 
     let videoId;

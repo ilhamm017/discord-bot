@@ -8,6 +8,7 @@ const { initDatabase } = require("./storage/db");
 const { handleAiRequest } = require("./utils/ai_chat");
 const { waitWithTyping } = require("./utils/typing");
 const {
+  enqueueTrack,
   getState,
   jumpToIndex,
   leaveVoice,
@@ -20,6 +21,8 @@ const {
   togglePause,
 } = require("./music/queue");
 const { buildControlPanel, updateControlPanel } = require("./music/panel");
+const { getSearchSession, clearSearchSession } = require("./music/search");
+const { resolveSpotifyTrackToYoutube } = require("./utils/spotify");
 
 initDatabase();
 
@@ -197,6 +200,188 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === "music_search") {
+      if (!interaction.guild) {
+        return interaction.reply({
+          content: "Perintah ini hanya bisa dipakai di server.",
+          ephemeral: true,
+        });
+      }
+
+      const session = getSearchSession(interaction.message?.id);
+      if (!session) {
+        return interaction.reply({
+          content: "Pilihan pencarian sudah kedaluwarsa. Jalankan lagi.",
+          ephemeral: true,
+        });
+      }
+
+      if (session.requesterId && interaction.user.id !== session.requesterId) {
+        return interaction.reply({
+          content: `Pencarian ini milik <@${session.requesterId}>.`,
+          ephemeral: true,
+        });
+      }
+
+      const rawIndex = interaction.values?.[0];
+      const targetIndex = Number(rawIndex);
+      if (!Number.isInteger(targetIndex)) {
+        return interaction.reply({
+          content: "Pilihan tidak valid.",
+          ephemeral: true,
+        });
+      }
+
+      const item = Array.isArray(session.results)
+        ? session.results[targetIndex]
+        : null;
+      if (!item) {
+        return interaction.reply({
+          content: "Hasil pilihan tidak ditemukan. Coba cari lagi.",
+          ephemeral: true,
+        });
+      }
+
+      let voiceChannel = null;
+      if (session.voiceChannelId) {
+        voiceChannel =
+          interaction.guild.channels.cache.get(session.voiceChannelId) || null;
+        if (!voiceChannel) {
+          voiceChannel = await interaction.guild.channels
+            .fetch(session.voiceChannelId)
+            .catch(() => null);
+        }
+      }
+
+      if (!voiceChannel) {
+        voiceChannel = interaction.member?.voice?.channel || null;
+      }
+
+      if (!voiceChannel || !voiceChannel.isVoiceBased?.()) {
+        return interaction.reply({
+          content: "Voice channel tujuan tidak ditemukan. Jalankan lagi.",
+          ephemeral: true,
+        });
+      }
+
+      const memberChannel = interaction.member?.voice?.channel;
+      if (memberChannel && memberChannel.id !== voiceChannel.id) {
+        return interaction.reply({
+          content: "Kamu harus berada di voice channel tujuan.",
+          ephemeral: true,
+        });
+      }
+
+      try {
+        await interaction.deferUpdate();
+
+        let track = null;
+        if (item.source === "spotify") {
+          const spotifyTrack = item.spotify || {
+            id: item.spotifyId,
+            name: item.title,
+            artists: item.artists || [],
+            durationMs: item.durationMs || 0,
+          };
+
+          const resolved = await resolveSpotifyTrackToYoutube(spotifyTrack);
+          if (!resolved?.url) {
+            await interaction.followUp({
+              content: "Gagal memetakan Spotify ke YouTube.",
+              ephemeral: true,
+            });
+            return;
+          }
+
+          track = {
+            url: resolved.url,
+            title: resolved.title || item.title || resolved.url,
+            requestedBy: interaction.user.tag,
+            requestedById: interaction.user.id,
+            requestedByTag: interaction.user.tag,
+            source: "spotify",
+            originUrl: item.url || null,
+          };
+        } else {
+          track = {
+            url: item.url,
+            title: item.title || item.url,
+            requestedBy: interaction.user.tag,
+            requestedById: interaction.user.id,
+            requestedByTag: interaction.user.tag,
+            source: "youtube",
+          };
+        }
+
+        let result;
+        try {
+          result = await enqueueTrack(voiceChannel, track, {
+            textChannelId: session.textChannelId || interaction.channelId,
+          });
+        } catch (error) {
+          logger.error("Queue error (search select).", error);
+          if (error?.message === "STREAM_NEEDS_FFMPEG") {
+            await interaction.followUp({
+              content:
+                "Format audio butuh FFmpeg. Install FFmpeg atau gunakan link lain.",
+              ephemeral: true,
+            });
+            return;
+          }
+          if (error?.message === "STREAM_FALLBACK_FAILED") {
+            await interaction.followUp({
+              content: "Gagal memutar audio (fallback yt-dlp). Coba lagi nanti.",
+              ephemeral: true,
+            });
+            return;
+          }
+          if (error?.message === "YTDLP_DOWNLOAD_FAILED") {
+            await interaction.followUp({
+              content: "Gagal mengunduh yt-dlp. Cek koneksi atau coba lagi nanti.",
+              ephemeral: true,
+            });
+            return;
+          }
+          await interaction.followUp({
+            content: "Gagal memutar audio.",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        try {
+          await updateControlPanel(client, result.state);
+        } catch (error) {
+          logger.warn("Failed updating control panel.", error);
+        }
+
+        clearSearchSession(interaction.message?.id);
+
+        const status = result.started
+          ? `Memutar: ${track.title}`
+          : `Ditambahkan ke antrian #${result.position}: ${track.title}`;
+
+        await interaction.editReply({
+          content: status,
+          components: [],
+        });
+      } catch (error) {
+        logger.error("Search select failed.", error);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({
+            content: "Terjadi error saat memilih hasil pencarian.",
+            ephemeral: true,
+          });
+        } else {
+          await interaction.reply({
+            content: "Terjadi error saat memilih hasil pencarian.",
+            ephemeral: true,
+          });
+        }
+      }
+      return;
+    }
+
     if (interaction.customId !== "music_select") return;
     if (!interaction.guild) {
       return interaction.reply({

@@ -87,6 +87,8 @@ const AI_COMMANDS = [
   "jelaskan",
   "member",
   "cek",
+  "ringkas",
+  "rangkum",
 ];
 
 function sanitizeMessage(text) {
@@ -213,6 +215,26 @@ function buildMemorySummary(userId) {
   }
   if (!lines.length) return "";
   return `Catatan memori user:\n${lines.join("\n")}`;
+}
+
+const SUMMARY_PATTERNS = [
+  /\b(ringkas|rangkum|summary)\b/i,
+  /\b(tadi|barusan).*\b(bahas|dibahas)\b/i,
+  /\b(bahas apa|ngomongin apa|dibahas apa)\b/i,
+];
+
+function parseSummaryRequest(prompt) {
+  const text = String(prompt || "").trim();
+  if (!text) return null;
+  const isSummary = SUMMARY_PATTERNS.some((pattern) => pattern.test(text));
+  if (!isSummary) return null;
+
+  const numberMatch = text.match(/\b(\d{1,3})\b/);
+  const limit = numberMatch ? Number.parseInt(numberMatch[1], 10) : null;
+  const safeLimit =
+    Number.isInteger(limit) && limit > 0 ? Math.min(limit, 200) : null;
+
+  return { limit: safeLimit };
 }
 
 const APOLOGY_PATTERNS = [
@@ -561,6 +583,15 @@ async function handleAiRequest(message, prompt) {
     }
   }
 
+  const summaryRequest = parseSummaryRequest(prompt);
+  if (summaryRequest) {
+    return {
+      type: "command",
+      name: "ringkas",
+      args: summaryRequest.limit ? [String(summaryRequest.limit)] : [],
+    };
+  }
+
   if (isBotQuestion(prompt)) {
     return {
       type: "reply",
@@ -587,6 +618,7 @@ async function handleAiRequest(message, prompt) {
     "Jika pengguna meminta bot masuk/join voice, gunakan command join dan isi args dengan nama channel atau mention user. " +
     "Jika pengguna meminta penjelasan bot, gunakan command jelaskan. " +
     "Jika pengguna minta cek member/anggota server (awal/baru/daftar/jumlah), gunakan command member. " +
+    "Jika pengguna minta ringkas/rangkum channel, gunakan command ringkas. " +
     "Jika pengguna bertanya/bercakap-cakap, gunakan type reply dan tulis jawaban. " +
     "Jika pengguna meminta info server, jawab dengan type reply berdasarkan info server yang tersedia. " +
     "Jika data tidak tersedia, katakan tidak punya akses. " +

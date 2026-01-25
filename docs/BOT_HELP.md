@@ -1,7 +1,7 @@
 Yova Bot (ringkas)
 
 Fitur utama:
-- Musik: YouTube/YouTube Music + link Spotify (metadata Spotify -> playback YouTube).
+- Musik: YouTube/YouTube Music + link Spotify (metadata Spotify -> playback YouTube), pencarian judul menampilkan pilihan YT/Spotify.
 - Panel kontrol: tombol play/pause/skip/stop/leave/repeat/shuffle + daftar antrian.
 - Favorit: daftar lagu sering diputar (kesukaanku).
 - AI: chat bebas + `ucapkan` untuk pesan ke user.
@@ -20,9 +20,11 @@ Perintah cepat:
 - yova ucapkan <pesan> @user
 - yova restore
 - yova jelaskan dirimu
+- yova ringkas [n] | yova rangkum [n]
 - yova member awal|baru|daftar|jumlah [n]
 - yova cek member ...
 
 Catatan:
 - Spotify butuh `spotify_client_id` + `spotify_client_secret` di config.json.
 - AI chat bisa jawab tanpa prefix kalau kamu reply ke pesan Yova.
+- Saat cari judul, Yova akan menampilkan daftar hasil yang bisa dipilih.

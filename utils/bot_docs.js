@@ -46,11 +46,15 @@ function answerBotQuestion(prompt) {
   if (text.includes("spotify")) {
     return (
       "Bisa. Pakai `yova play <link spotify>` (track/playlist/album). " +
-      "Spotify cuma metadata, playback tetap dari YouTube."
+      "Spotify cuma metadata, playback tetap dari YouTube. " +
+      "Kalau cari judul, hasilnya muncul list YT/Spotify."
     );
   }
   if (text.includes("youtube") || text.includes("yt")) {
-    return "Bisa. Pakai `yova play <judul|url>` untuk YouTube/YouTube Music.";
+    return (
+      "Bisa. Pakai `yova play <judul|url>` untuk YouTube/YouTube Music. " +
+      "Judul akan menampilkan list hasil (YT/Spotify)."
+    );
   }
   if (text.includes("panel") || text.includes("kontrol")) {
     return "Ada panel kontrol. Pakai `yova kontrol` buat tombol play/pause/skip/repeat/queue.";
@@ -60,6 +64,9 @@ function answerBotQuestion(prompt) {
   }
   if (text.includes("favorit") || text.includes("kesukaanku")) {
     return "Ada favorit. Pakai `yova kesukaanku` atau `yova play kesukaanku`.";
+  }
+  if (text.includes("ringkas") || text.includes("rangkum") || text.includes("summary")) {
+    return "Bisa ringkas channel. Pakai `yova ringkas [n]` atau `yova rangkum [n]`.";
   }
   if (text.includes("ai") || text.includes("ucapkan")) {
     return "AI bisa chat bebas atau `yova ucapkan <pesan> @user`.";
