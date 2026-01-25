@@ -3,3 +3,5 @@ logs/
 .data/
 config.json
 config.json
+.data/
+cookies.txt
