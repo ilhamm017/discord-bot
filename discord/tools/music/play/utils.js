@@ -1,0 +1,74 @@
+const { StringSelectMenuBuilder } = require("discord.js");
+
+const MENTION_REGEX = /<@!?\d+>/g;
+const SEARCH_OPTION_LIMIT = 25;
+
+function stripTargetTokens(query, { hasMention } = {}) {
+    if (!query) return "";
+    let cleaned = query.replace(MENTION_REGEX, " ");
+    if (hasMention) {
+        cleaned = cleaned.replace(/\b(untuk|buat)\b/gi, " ");
+    }
+    return cleaned.replace(/\s+/g, " ").trim();
+}
+
+const { truncateText, formatDuration } = require("../../../../functions/utils/formatting");
+
+
+function resolveTargetVoiceChannel(message) {
+    const mentionedMember = message.mentions?.members
+        ? message.mentions.members.find((member) => !member.user?.bot)
+        : null;
+
+    if (mentionedMember) {
+        const targetChannel = mentionedMember.voice?.channel;
+        if (!targetChannel) {
+            return {
+                error: "Target belum ada di voice channel.",
+            };
+        }
+        return { channel: targetChannel, targetMember: mentionedMember };
+    }
+
+    const memberChannel = message.member?.voice?.channel;
+    if (!memberChannel) {
+        return { error: "Kamu harus join voice channel dulu atau sebutkan target." };
+    }
+
+    return { channel: memberChannel, targetMember: null };
+}
+
+function buildSearchSelect(results) {
+    const options = results.slice(0, SEARCH_OPTION_LIMIT).map((item, index) => {
+        const prefix = item.source === "spotify" ? "SP" : "YT";
+        const label = truncateText(`${prefix}: ${item.title}`, 100);
+        const duration = item.durationMs
+            ? formatDuration(Math.round(item.durationMs / 1000))
+            : "-";
+        const descriptionBase =
+            item.source === "spotify"
+                ? `Spotify • ${item.artists?.join(", ") || "-"}`
+                : "YouTube";
+        const description = truncateText(`${descriptionBase} • ${duration}`, 100);
+        return {
+            label,
+            description,
+            value: String(index),
+        };
+    });
+
+    if (!options.length) return null;
+
+    return new StringSelectMenuBuilder()
+        .setCustomId("music_search")
+        .setPlaceholder("Pilih hasil pencarian")
+        .addOptions(options);
+}
+
+module.exports = {
+    stripTargetTokens,
+    truncateText,
+    formatDuration,
+    resolveTargetVoiceChannel,
+    buildSearchSelect,
+};

@@ -1,195 +1,117 @@
-const fs = require("fs");
-const path = require("path");
-const Database = require("better-sqlite3");
 const logger = require("../utils/logger");
+const { connectDB, sequelize } = require("./sequelize");
+const { QueueState, QueueItem } = require("../models/Queue");
+const Favorite = require("../models/Favorite");
+const User = require("../models/User");
+const SpotifyCache = require("../models/SpotifyCache");
+const UserMemory = require("../models/UserMemory");
+const { Op } = require("sequelize");
 
-const dataDir = path.resolve(process.cwd(), ".data");
-const dbPath = path.join(dataDir, "bot.db");
+async function ensureReady() {
+  try {
+    await sequelize.authenticate();
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
 
-let db = null;
-let statements = null;
-
-function initDatabase() {
-  if (db) return db;
+// -----------------------------------------------------------------------------
+// Queue State
+// -----------------------------------------------------------------------------
+async function saveQueueState(guildId, state) {
+  if (!guildId || !state) return;
+  const queue = Array.isArray(state.queue) ? state.queue : [];
 
   try {
-    fs.mkdirSync(dataDir, { recursive: true });
-    db = new Database(dbPath);
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
+    await sequelize.transaction(async (t) => {
+      // 1. Upsert Queue State
+      await QueueState.upsert({
+        guildId,
+        currentIndex: state.currentIndex,
+        repeatMode: state.repeatMode || "off",
+      }, { transaction: t });
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS queue_state (
-        guild_id TEXT PRIMARY KEY,
-        current_index INTEGER NOT NULL DEFAULT -1,
-        repeat_mode TEXT NOT NULL DEFAULT 'off',
-        updated_at INTEGER NOT NULL
-      );
+      // 2. Overwrite Queue Items
+      await QueueItem.destroy({ where: { guildId }, transaction: t });
 
-      CREATE TABLE IF NOT EXISTS queue_items (
-        guild_id TEXT NOT NULL,
-        position INTEGER NOT NULL,
-        url TEXT NOT NULL,
-        title TEXT NOT NULL,
-        requested_by_id TEXT,
-        requested_by_tag TEXT,
-        PRIMARY KEY (guild_id, position)
-      );
+      const items = queue.map((track, index) => ({
+        guildId,
+        position: index,
+        url: track?.url || "",
+        title: track?.title || track?.url || "",
+        requestedById: track?.requestedById || null,
+        requestedByTag: track?.requestedByTag || null,
+      }));
 
-      CREATE INDEX IF NOT EXISTS idx_queue_items_guild
-        ON queue_items (guild_id);
+      if (items.length > 0) {
+        await QueueItem.bulkCreate(items, { transaction: t });
+      }
+    });
+  } catch (error) {
+    logger.error("Failed saving queue state (Sequelize).", error);
+  }
+}
 
-      CREATE TABLE IF NOT EXISTS favorites (
-        user_id TEXT NOT NULL,
-        video_id TEXT NOT NULL,
-        url TEXT NOT NULL,
-        title TEXT NOT NULL,
-        play_count INTEGER NOT NULL DEFAULT 0,
-        last_played_at INTEGER NOT NULL,
-        PRIMARY KEY (user_id, video_id)
-      );
+function loadQueueState(guildId) {
+  // Note: The original code was synchronous. Sequelize is async.
+  // However, looking at the codebase, loadQueueState is often called in async contexts OR the result is needed immediately.
+  // Making this ASYNC would break the API signature if it was sync.
+  // BUT the original used `better-sqlite3` which is sync.
+  // Only solution is to wrap this in a way or change usages to await.
+  // Let's check usages of loadQueueState.
+  // Usages: queue.js (restoreQueue) -> awaits it? No `const persisted = loadQueueState(guildId)`
+  // Discord bot usually runs async. I should refactor callers to await this function.
 
-      CREATE INDEX IF NOT EXISTS idx_favorites_user
-        ON favorites (user_id);
+  // For now I will export an async version and I MUST UPDATE CALLERS.
+  return loadQueueStateAsync(guildId);
+}
 
-      CREATE TABLE IF NOT EXISTS user_preferences (
-        user_id TEXT PRIMARY KEY,
-        call_name TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
+async function loadQueueStateAsync(guildId) {
+  if (!guildId) return null;
+  try {
+    const queueState = await QueueState.findByPk(guildId);
+    if (!queueState) return null;
 
-      CREATE TABLE IF NOT EXISTS spotify_cache (
-        spotify_id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        artists TEXT NOT NULL,
-        duration_ms INTEGER NOT NULL,
-        youtube_url TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
+    const items = await QueueItem.findAll({
+      where: { guildId },
+      order: [["position", "ASC"]],
+    });
 
-      CREATE TABLE IF NOT EXISTS user_memory (
-        user_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (user_id, kind, value)
-      );
-    `);
+    const queue = items.map((item) => ({
+      url: item.url,
+      title: item.title,
+      requestedById: item.requestedById || null,
+      requestedByTag: item.requestedByTag || null,
+      requestedBy: item.requestedByTag || item.requestedById || "-",
+    }));
 
-    statements = {
-      upsertQueueState: db.prepare(`
-        INSERT INTO queue_state (guild_id, current_index, repeat_mode, updated_at)
-        VALUES (@guildId, @currentIndex, @repeatMode, @updatedAt)
-        ON CONFLICT(guild_id) DO UPDATE SET
-          current_index = excluded.current_index,
-          repeat_mode = excluded.repeat_mode,
-          updated_at = excluded.updated_at
-      `),
-      deleteQueueItems: db.prepare(
-        "DELETE FROM queue_items WHERE guild_id = ?"
-      ),
-      insertQueueItem: db.prepare(`
-        INSERT INTO queue_items
-          (guild_id, position, url, title, requested_by_id, requested_by_tag)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `),
-      selectQueueState: db.prepare(
-        "SELECT current_index, repeat_mode FROM queue_state WHERE guild_id = ?"
-      ),
-      selectQueueItems: db.prepare(`
-        SELECT position, url, title, requested_by_id, requested_by_tag
-        FROM queue_items
-        WHERE guild_id = ?
-        ORDER BY position ASC
-      `),
-      deleteQueueState: db.prepare("DELETE FROM queue_state WHERE guild_id = ?"),
-      upsertFavorite: db.prepare(`
-        INSERT INTO favorites
-          (user_id, video_id, url, title, play_count, last_played_at)
-        VALUES (@userId, @videoId, @url, @title, 1, @lastPlayedAt)
-        ON CONFLICT(user_id, video_id) DO UPDATE SET
-          url = excluded.url,
-          title = excluded.title,
-          play_count = play_count + 1,
-          last_played_at = excluded.last_played_at
-      `),
-      selectFavorites: db.prepare(`
-        SELECT url, title, play_count
-        FROM favorites
-        WHERE user_id = ? AND play_count >= ?
-        ORDER BY play_count DESC, last_played_at DESC, title ASC
-        LIMIT ?
-      `),
-      selectFavoritesDetailed: db.prepare(`
-        SELECT video_id, url, title, play_count, last_played_at
-        FROM favorites
-        WHERE user_id = ? AND play_count >= ?
-        ORDER BY play_count DESC, last_played_at DESC, title ASC
-        LIMIT ?
-      `),
-      deleteFavorite: db.prepare(`
-        DELETE FROM favorites
-        WHERE user_id = ? AND video_id = ?
-      `),
-      upsertUserPreference: db.prepare(`
-        INSERT INTO user_preferences (user_id, call_name, updated_at)
-        VALUES (@userId, @callName, @updatedAt)
-        ON CONFLICT(user_id) DO UPDATE SET
-          call_name = excluded.call_name,
-          updated_at = excluded.updated_at
-      `),
-      selectUserPreference: db.prepare(`
-        SELECT call_name
-        FROM user_preferences
-        WHERE user_id = ?
-      `),
-      deleteUserPreference: db.prepare(
-        "DELETE FROM user_preferences WHERE user_id = ?"
-      ),
-      upsertSpotifyCache: db.prepare(`
-        INSERT INTO spotify_cache
-          (spotify_id, title, artists, duration_ms, youtube_url, updated_at)
-        VALUES (@spotifyId, @title, @artists, @durationMs, @youtubeUrl, @updatedAt)
-        ON CONFLICT(spotify_id) DO UPDATE SET
-          title = excluded.title,
-          artists = excluded.artists,
-          duration_ms = excluded.duration_ms,
-          youtube_url = excluded.youtube_url,
-          updated_at = excluded.updated_at
-      `),
-      selectSpotifyCache: db.prepare(`
-        SELECT spotify_id, title, artists, duration_ms, youtube_url, updated_at
-        FROM spotify_cache
-        WHERE spotify_id = ?
-      `),
-      upsertUserMemory: db.prepare(`
-        INSERT INTO user_memory (user_id, kind, value, updated_at)
-        VALUES (@userId, @kind, @value, @updatedAt)
-        ON CONFLICT(user_id, kind, value) DO UPDATE SET
-          updated_at = excluded.updated_at
-      `),
-      selectUserMemory: db.prepare(`
-        SELECT kind, value, updated_at
-        FROM user_memory
-        WHERE user_id = ?
-        ORDER BY updated_at DESC
-        LIMIT ?
-      `),
+    return {
+      queue,
+      currentIndex: queueState.currentIndex,
+      repeatMode: queueState.repeatMode || "off",
     };
   } catch (error) {
-    logger.error("Failed to initialize database.", error);
-    db = null;
-    statements = null;
+    logger.error("Failed loading queue state (Sequelize).", error);
+    return null;
   }
-
-  return db;
 }
 
-function ensureReady() {
-  if (!db) initDatabase();
-  return Boolean(db && statements);
+async function clearQueueState(guildId) {
+  if (!guildId) return;
+  try {
+    await sequelize.transaction(async (t) => {
+      await QueueItem.destroy({ where: { guildId }, transaction: t });
+      await QueueState.destroy({ where: { guildId }, transaction: t });
+    });
+  } catch (error) {
+    logger.error("Failed clearing queue state (Sequelize).", error);
+  }
 }
 
+// -----------------------------------------------------------------------------
+// Favorites
+// -----------------------------------------------------------------------------
 function extractVideoId(url) {
   if (!url || typeof url !== "string") return null;
   const match = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
@@ -199,271 +121,193 @@ function extractVideoId(url) {
   return null;
 }
 
-function saveQueueState(guildId, state) {
-  if (!guildId || !state) return;
-  if (!ensureReady()) return;
-
-  const queue = Array.isArray(state.queue) ? state.queue : [];
-  const currentIndex = Number.isInteger(state.currentIndex) ? state.currentIndex : -1;
-  const repeatMode = state.repeatMode || "off";
-  const updatedAt = Date.now();
-
-  const runTx = db.transaction(() => {
-    statements.upsertQueueState.run({
-      guildId,
-      currentIndex,
-      repeatMode,
-      updatedAt,
-    });
-
-    statements.deleteQueueItems.run(guildId);
-    for (let i = 0; i < queue.length; i += 1) {
-      const track = queue[i];
-      const title = track?.title || track?.url || "";
-      statements.insertQueueItem.run(
-        guildId,
-        i,
-        track?.url || "",
-        title,
-        track?.requestedById || null,
-        track?.requestedByTag || null
-      );
-    }
-  });
-
-  try {
-    runTx();
-  } catch (error) {
-    logger.error("Failed saving queue state.", error);
-  }
-}
-
-function loadQueueState(guildId) {
-  if (!guildId) return null;
-  if (!ensureReady()) return null;
-
-  try {
-    const stateRow = statements.selectQueueState.get(guildId);
-    const items = statements.selectQueueItems.all(guildId);
-
-    const queue = items.map((row) => ({
-      url: row.url,
-      title: row.title,
-      requestedById: row.requested_by_id || null,
-      requestedByTag: row.requested_by_tag || null,
-      requestedBy: row.requested_by_tag || row.requested_by_id || "-",
-    }));
-
-    return {
-      queue,
-      currentIndex: Number.isInteger(stateRow?.current_index)
-        ? stateRow.current_index
-        : -1,
-      repeatMode: stateRow?.repeat_mode || "off",
-    };
-  } catch (error) {
-    logger.error("Failed loading queue state.", error);
-    return null;
-  }
-}
-
-function clearQueueState(guildId) {
-  if (!guildId) return;
-  if (!ensureReady()) return;
-
-  const runTx = db.transaction(() => {
-    statements.deleteQueueItems.run(guildId);
-    statements.deleteQueueState.run(guildId);
-  });
-
-  try {
-    runTx();
-  } catch (error) {
-    logger.error("Failed clearing queue state.", error);
-  }
-}
-
-function recordPlay({ userId, url, title }) {
+async function recordPlay({ userId, url, title }) {
   if (!userId || !url) return;
-  if (!ensureReady()) return;
-
   const videoId = extractVideoId(url) || url;
-  const lastPlayedAt = Date.now();
 
   try {
-    statements.upsertFavorite.run({
-      userId,
-      videoId,
-      url,
-      title: title || url,
-      lastPlayedAt,
+    const existing = await Favorite.findOne({ where: { userId, videoId } });
+    if (existing) {
+      existing.playCount += 1;
+      existing.lastPlayedAt = new Date();
+      existing.title = title || url;
+      existing.url = url;
+      await existing.save();
+    } else {
+      await Favorite.create({
+        userId,
+        videoId,
+        url,
+        title: title || url,
+        playCount: 1,
+        lastPlayedAt: new Date(),
+      });
+    }
+  } catch (error) {
+    logger.error("Failed recording favorite play (Sequelize).", error);
+  }
+}
+
+// Callers expect Sync return or Promise? Better-sqlite was Sync.
+// I WILL CHANGE ALL EXPORTS TO ASYNC. This is a BREAKING CHANGE for the internal modules, 
+// so I must update `discord/commands/music/play/favorites.js` etc.
+async function getFavoriteTracks(userId, { minPlays = 5, limit = 20 } = {}) {
+  try {
+    const favs = await Favorite.findAll({
+      where: {
+        userId,
+        playCount: { [Op.gte]: minPlays },
+      },
+      order: [
+        ["playCount", "DESC"],
+        ["lastPlayedAt", "DESC"],
+        ["title", "ASC"],
+      ],
+      limit,
     });
+    return favs;
   } catch (error) {
-    logger.error("Failed recording favorite play.", error);
-  }
-}
-
-function getFavoriteTracks(userId, { minPlays = 5, limit = 20 } = {}) {
-  if (!userId) return [];
-  if (!ensureReady()) return [];
-
-  try {
-    return statements.selectFavorites.all(userId, minPlays, limit);
-  } catch (error) {
-    logger.error("Failed loading favorites.", error);
+    logger.error("Failed loading favorites (Sequelize).", error);
     return [];
   }
 }
 
-function listFavorites(userId, { minPlays = 1, limit = 20 } = {}) {
-  if (!userId) return [];
-  if (!ensureReady()) return [];
-
-  try {
-    return statements.selectFavoritesDetailed.all(userId, minPlays, limit);
-  } catch (error) {
-    logger.error("Failed loading favorites.", error);
-    return [];
-  }
+async function listFavorites(userId, { minPlays = 1, limit = 20 } = {}) {
+  return getFavoriteTracks(userId, { minPlays, limit });
 }
 
-function deleteFavorite(userId, videoId) {
+async function deleteFavorite(userId, videoId) {
   if (!userId || !videoId) return false;
-  if (!ensureReady()) return false;
-
   try {
-    const result = statements.deleteFavorite.run(userId, videoId);
-    return result.changes > 0;
+    const deleted = await Favorite.destroy({ where: { userId, videoId } });
+    return deleted > 0;
   } catch (error) {
-    logger.error("Failed deleting favorite.", error);
+    logger.error("Failed deleting favorite (Sequelize).", error);
     return false;
   }
 }
 
-function setUserCallName(userId, callName) {
-  if (!userId || !callName) return false;
-  if (!ensureReady()) return false;
-
+// -----------------------------------------------------------------------------
+// User Preferences (Call Name)
+// -----------------------------------------------------------------------------
+async function setUserCallName(userId, callName) {
   try {
-    const result = statements.upsertUserPreference.run({
-      userId,
-      callName,
-      updatedAt: Date.now(),
-    });
-    return result.changes > 0;
+    const [user] = await User.findOrCreate({ where: { id: userId } });
+    user.callName = callName;
+    await user.save();
+    return true;
   } catch (error) {
-    logger.error("Failed saving user preference.", error);
+    logger.error("Failed saving user call name (Sequelize).", error);
     return false;
   }
 }
 
-function getUserCallName(userId) {
-  if (!userId) return null;
-  if (!ensureReady()) return null;
-
+async function getUserCallName(userId) {
   try {
-    const row = statements.selectUserPreference.get(userId);
-    return row?.call_name || null;
+    const user = await User.findByPk(userId);
+    return user?.callName || null;
   } catch (error) {
-    logger.error("Failed loading user preference.", error);
+    logger.error("Failed loading user call name (Sequelize).", error);
     return null;
   }
 }
 
-function clearUserCallName(userId) {
-  if (!userId) return false;
-  if (!ensureReady()) return false;
-
+async function clearUserCallName(userId) {
   try {
-    const result = statements.deleteUserPreference.run(userId);
-    return result.changes > 0;
+    const user = await User.findByPk(userId);
+    if (!user) return false;
+    user.callName = null;
+    await user.save();
+    return true;
   } catch (error) {
-    logger.error("Failed clearing user preference.", error);
+    logger.error("Failed clearing user call name (Sequelize).", error);
     return false;
   }
 }
 
-function saveSpotifyCache(entry) {
+// -----------------------------------------------------------------------------
+// Spotify Cache
+// -----------------------------------------------------------------------------
+async function saveSpotifyCache(entry) {
   if (!entry?.spotifyId || !entry?.youtubeUrl) return false;
-  if (!ensureReady()) return false;
-
   try {
-    const result = statements.upsertSpotifyCache.run({
+    await SpotifyCache.upsert({
       spotifyId: entry.spotifyId,
       title: entry.title || "",
       artists: entry.artists || "",
       durationMs: Number(entry.durationMs) || 0,
       youtubeUrl: entry.youtubeUrl,
-      updatedAt: Date.now(),
     });
-    return result.changes > 0;
+    return true;
   } catch (error) {
-    logger.error("Failed saving Spotify cache.", error);
+    logger.error("Failed saving Spotify cache (Sequelize).", error);
     return false;
   }
 }
 
-function getSpotifyCache(spotifyId) {
-  if (!spotifyId) return null;
-  if (!ensureReady()) return null;
-
+async function getSpotifyCache(spotifyId) {
   try {
-    const row = statements.selectSpotifyCache.get(spotifyId);
-    if (!row) return null;
-    return {
-      spotifyId: row.spotify_id,
-      title: row.title,
-      artists: row.artists,
-      durationMs: row.duration_ms,
-      youtubeUrl: row.youtube_url,
-      updatedAt: row.updated_at,
-    };
+    const cache = await SpotifyCache.findByPk(spotifyId);
+    if (!cache) return null;
+    return cache; // Sequelize model instance is compatible enough
   } catch (error) {
-    logger.error("Failed loading Spotify cache.", error);
+    logger.error("Failed loading Spotify cache (Sequelize).", error);
     return null;
   }
 }
 
-function addUserMemory({ userId, kind, value }) {
-  if (!userId || !kind || !value) return false;
-  if (!ensureReady()) return false;
-
+// -----------------------------------------------------------------------------
+// User Memory
+// -----------------------------------------------------------------------------
+async function addUserMemory({ userId, kind, value }) {
   try {
-    const result = statements.upsertUserMemory.run({
+    // Upsert via findOrCreate + update or direct upsert if composite key is handled
+    // Sequelize upsert on composite PK works in SQLite/Postgres
+    await UserMemory.upsert({
       userId,
       kind,
       value,
-      updatedAt: Date.now(),
     });
-    return result.changes > 0;
+    return true;
   } catch (error) {
-    logger.error("Failed saving user memory.", error);
+    logger.error("Failed saving user memory (Sequelize).", error);
     return false;
   }
 }
 
-function listUserMemory(userId, { limit = 10, ttlDays = 90 } = {}) {
-  if (!userId) return [];
-  if (!ensureReady()) return [];
-
+async function listUserMemory(userId, { limit = 10, ttlDays = 90 } = {}) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
   const ttl = Number(ttlDays) || 0;
-  const cutoff = ttl > 0 ? Date.now() - ttl * 86400 * 1000 : 0;
+  const cutoff = ttl > 0 ? new Date(Date.now() - ttl * 86400 * 1000) : null;
+
+  const where = { userId };
+  if (cutoff) {
+    where.updatedAt = { [Op.gte]: cutoff };
+  }
 
   try {
-    const rows = statements.selectUserMemory.all(userId, safeLimit);
-    if (!rows.length) return [];
-    return rows.filter((row) => !cutoff || row.updated_at >= cutoff);
+    const rows = await UserMemory.findAll({
+      where,
+      order: [["updatedAt", "DESC"]],
+      limit: safeLimit,
+    });
+    return rows.map(r => ({ kind: r.kind, value: r.value, updated_at: r.updatedAt }));
   } catch (error) {
-    logger.error("Failed loading user memory.", error);
+    logger.error("Failed loading user memory (Sequelize).", error);
     return [];
   }
+}
+
+// No-op for initDatabase as sequelize connectDB is handled in index.js, 
+// but we keep it for API compatibility if something calls it.
+function initDatabase() {
+  return connectDB();
 }
 
 module.exports = {
   initDatabase,
   saveQueueState,
-  loadQueueState,
+  loadQueueState, // exported as sync wrapper that returns promise, careful!
   clearQueueState,
   recordPlay,
   getFavoriteTracks,
