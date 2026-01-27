@@ -4,6 +4,18 @@ const path = require("path");
 const logDir = path.resolve(process.cwd(), "logs");
 
 // Format kustom untuk log console yang lebih rapi
+const safeStringify = (obj) => {
+  const cache = new Set();
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (cache.has(value)) return "[Circular]";
+      cache.add(value);
+    }
+    return value;
+  }, 2);
+};
+
+// Format kustom untuk log console yang lebih rapi
 const consoleFormat = winston.format.combine(
   winston.format.colorize(),
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
@@ -11,12 +23,17 @@ const consoleFormat = winston.format.combine(
     let metaStr = "";
     if (Object.keys(meta).length > 0) {
       // Jika meta adalah error, tampilkan stack trace
-      if (meta instanceof Error) {
-        metaStr = `\n${meta.stack}`;
+      const error = meta instanceof Error ? meta : (meta.error instanceof Error ? meta.error : null);
+      if (error) {
+        metaStr = `\n${error.stack}`;
       } else if (meta.stack) {
         metaStr = `\n${meta.stack}`;
       } else {
-        metaStr = `\n${JSON.stringify(meta, null, 2)}`;
+        try {
+          metaStr = `\n${safeStringify(meta)}`;
+        } catch (e) {
+          metaStr = `\n[Serialization Error: ${e.message}]`;
+        }
       }
     }
     return `[${timestamp}] ${level}: ${message}${metaStr}`;
@@ -30,7 +47,7 @@ const fileFormat = winston.format.combine(
 );
 
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || "info",
+  level: process.env.LOG_LEVEL || "debug",
   format: fileFormat,
   transports: [
     // Simpan semua log level error ke error.log

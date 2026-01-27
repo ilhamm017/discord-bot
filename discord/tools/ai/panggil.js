@@ -8,7 +8,7 @@ module.exports = {
   async execute(message, args) {
     const raw = args.join(" ").trim();
     if (!raw) {
-      const current = getUserCallName(message.author.id);
+      const current = await getUserCallName(message.author.id);
       if (current) {
         return message.reply(`Oke, panggilan kamu saat ini: ${current}.`);
       }
@@ -22,7 +22,7 @@ module.exports = {
     }
 
     if (/^(reset|hapus|lupa|clear)$/i.test(payload.trim())) {
-      clearUserCallName(message.author.id);
+      await clearUserCallName(message.author.id);
       return message.reply("Oke, panggilan kamu gue hapus.");
     }
 
@@ -31,7 +31,7 @@ module.exports = {
       return message.reply("Nama panggilan nggak valid.");
     }
 
-    setUserCallName(message.author.id, callName);
+    await setUserCallName(message.author.id, callName);
     return message.reply(`Sip, gue panggil kamu ${callName}.`);
   },
 };

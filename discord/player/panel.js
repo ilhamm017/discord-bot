@@ -316,7 +316,11 @@ function buildControlPanel(state) {
       .setCustomId("music_loop_all")
       .setLabel("Ulang Playlist")
       .setStyle(isLoopAll ? ButtonStyle.Success : ButtonStyle.Secondary)
-      .setDisabled(!canLoop)
+      .setDisabled(!canLoop),
+    new ButtonBuilder()
+      .setCustomId("music_switch_engine")
+      .setLabel(state?.engine === "lavalink" ? "Use FFmpeg" : "Use Lavalink")
+      .setStyle(ButtonStyle.Secondary)
   );
 
   const components = [row1, row2, row3];

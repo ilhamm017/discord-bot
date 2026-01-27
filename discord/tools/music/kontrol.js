@@ -14,14 +14,10 @@ module.exports = {
       return message.reply("Bot belum berada di voice channel.");
     }
 
-    const voiceChannel = message.member?.voice?.channel;
-    if (!voiceChannel) {
-      return message.reply("Kamu harus join voice channel dulu.");
-    }
-
-    if (state.channelId && voiceChannel.id !== state.channelId) {
-      return message.reply("Kamu harus berada di voice channel yang sama dengan bot.");
-    }
+    // Voice channel checks removed to allow control from anywhere
+    // const voiceChannel = message.member?.voice?.channel;
+    // if (!voiceChannel) ...
+    // if (state.channelId && voiceChannel.id !== state.channelId) ...
 
     const panel = buildControlPanel(state);
     const sent = await message.reply(panel);

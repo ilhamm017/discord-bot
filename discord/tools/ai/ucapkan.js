@@ -11,18 +11,18 @@ try {
 }
 
 const MAX_MESSAGE_LENGTH = 1800;
-const CONTEXT_LIMIT = Number.isInteger(config.groq_context_messages)
-  ? config.groq_context_messages
+const CONTEXT_LIMIT = Number.isInteger(config.google_context_messages || config.groq_context_messages)
+  ? (config.google_context_messages || config.groq_context_messages)
   : 5;
-const CONTEXT_MIN_WORDS = Number.isInteger(config.groq_context_min_words)
-  ? config.groq_context_min_words
+const CONTEXT_MIN_WORDS = Number.isInteger(config.google_context_min_words || config.groq_context_min_words)
+  ? (config.google_context_min_words || config.groq_context_min_words)
   : 3;
-const TEMPERATURE = Number.isFinite(Number(config.groq_temperature))
-  ? Number(config.groq_temperature)
+const TEMPERATURE = Number.isFinite(Number(config.google_temperature || config.groq_temperature))
+  ? Number(config.google_temperature || config.groq_temperature)
   : 0.3;
-const MAX_TOKENS = Number.isFinite(Number(config.groq_max_tokens))
-  ? Number(config.groq_max_tokens)
-  : 160;
+const MAX_TOKENS = Number.isFinite(Number(config.google_max_tokens || config.groq_max_tokens))
+  ? Number(config.google_max_tokens || config.groq_max_tokens)
+  : 250;
 
 const {
   sanitizeMessage,
@@ -88,7 +88,7 @@ module.exports = {
       mentionedUser?.globalName ||
       mentionedUser?.username ||
       "";
-    const storedCallName = getUserCallName(mentionedUser.id);
+    const storedCallName = await getUserCallName(mentionedUser.id);
     const callName =
       sanitizeCallName(storedCallName) || getShortName(displayName);
     logger.info("AI request: ucapkan", {
@@ -151,8 +151,8 @@ module.exports = {
       });
     } catch (error) {
       logger.error("AI response failed.", error);
-      if (error?.message === "GROQ_API_KEY_MISSING") {
-        return message.reply("GROQ API key belum diset di config.json.");
+      if (error?.message && (error.message.includes("GROQ_API_KEY_MISSING") || error.message.includes("GOOGLE_API_KEY_MISSING"))) {
+        return message.reply("Google/Groq API key belum diset di config.json.");
       }
       return message.reply("Gagal membuat pesan AI. Coba lagi nanti.");
     }

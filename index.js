@@ -1,16 +1,111 @@
 const { connectDB } = require("./storage/sequelize");
 const discord = require("./discord");
 const logger = require("./utils/logger");
+const ffmpeg = require("ffmpeg-static");
+const play = require("play-dl");
+const path = require("path");
+const fs = require("fs");
+
+// Configure FFmpeg
+if (ffmpeg) {
+  const ffmpegDir = path.dirname(ffmpeg);
+  if (!process.env.PATH.includes(ffmpegDir)) {
+    process.env.PATH = `${ffmpegDir}${path.delimiter}${process.env.PATH}`;
+  }
+  logger.info(`FFmpeg configured from: ${ffmpeg}`);
+} else {
+  logger.warn("ffmpeg-static returned null, music playback might fail.");
+}
 
 async function main() {
   try {
     // 1. Initialize Core Services (DB, etc.)
     await connectDB();
 
-    // 2. Start Platforms
+    // 2. Start Lavalink (Infrastructure for premium audio)
+    const { spawn, execSync } = require("child_process");
+    const lavalinkPath = path.join(__dirname, "lavalink", "Lavalink.jar");
+    const jrePath = path.join(__dirname, "lavalink", "jre", "bin", "java");
+
+    // CRITICAL: Clean up existing Lavalink process on the same port
+    try {
+      if (process.platform !== "win32") {
+        execSync("fuser -k 2333/tcp", { stdio: "ignore" });
+        logger.info("Cleaning up existing Lavalink processes on port 2333...");
+      }
+    } catch (e) { }
+
+    logger.info("Starting Lavalink server...");
+    const logPath = path.join(__dirname, "lavalink", "lavalink_server.log");
+    const out = fs.openSync(logPath, "a");
+    const lavalinkProcess = spawn(jrePath, ["-jar", lavalinkPath], {
+      cwd: path.join(__dirname, "lavalink"),
+      stdio: ["ignore", out, out],
+      detached: false
+    });
+
+    lavalinkProcess.on("error", (err) => logger.error("Lavalink process error:", err));
+
+    const cleanup = () => {
+      logger.info("Shutting down... Cleaning up processes.");
+      if (lavalinkProcess) {
+        lavalinkProcess.kill("SIGTERM");
+      }
+    };
+
+    process.on("exit", cleanup);
+    process.on("SIGINT", () => {
+      cleanup();
+      process.exit();
+    });
+    process.on("SIGTERM", () => {
+      cleanup();
+      process.exit();
+    });
+
+    // 3. Wait for Lavalink to be ready
+    const net = require("net");
+    const waitForLavalink = () => new Promise((resolve, reject) => {
+      const start = Date.now();
+      const check = () => {
+        const socket = new net.Socket();
+        socket.setTimeout(1000);
+        socket.on('connect', () => {
+          socket.destroy();
+          logger.info("Lavalink server is ready!");
+          // Give it a tiny bit more time to settle
+          setTimeout(resolve, 500);
+        });
+        socket.on('timeout', () => {
+          socket.destroy();
+          if (Date.now() - start > 60000) reject(new Error("Timeout waiting for Lavalink"));
+          else setTimeout(check, 1000);
+        });
+        socket.on('error', (err) => {
+          socket.destroy();
+          if (Date.now() - start > 60000) reject(new Error("Timeout waiting for Lavalink"));
+          else setTimeout(check, 1000);
+        });
+        socket.connect(2333, "127.0.0.1");
+      };
+      check();
+    });
+
+    logger.info("Waiting for Lavalink to initialize (this may take a few seconds)...");
+    await waitForLavalink();
+
+    // 4. Start Platforms
     await discord.start();
 
-    // Future: await whatsapp.start();
+    // 5. Initialize Lavalink Manager (Immediately after login so client.user is available)
+    const lavalinkManager = require("./discord/player/LavalinkManager");
+    lavalinkManager.init([{
+      id: "local-node",
+      host: "127.0.0.1",
+      port: 2333,
+      authorization: "youshallnotpass",
+      secure: false
+    }]);
 
   } catch (error) {
     logger.error("Failed to start application:", error);

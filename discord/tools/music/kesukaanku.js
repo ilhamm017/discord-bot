@@ -16,7 +16,7 @@ module.exports = {
         return message.reply("Gunakan: yova kesukaanku hapus <nomor/url>");
       }
 
-      const favorites = listFavorites(message.author.id, {
+      const favorites = await listFavorites(message.author.id, {
         minPlays: 1,
         limit: LIST_LIMIT,
       });
@@ -36,7 +36,7 @@ module.exports = {
         videoId = extractVideoId(target) || target;
       }
 
-      const removed = deleteFavorite(message.author.id, videoId);
+      const removed = await deleteFavorite(message.author.id, videoId);
       if (!removed) {
         return message.reply("Lagu favorit tidak ditemukan.");
       }
@@ -44,7 +44,7 @@ module.exports = {
       return message.reply("Lagu favorit berhasil dihapus.");
     }
 
-    const favorites = listFavorites(message.author.id, {
+    const favorites = await listFavorites(message.author.id, {
       minPlays: 1,
       limit: LIST_LIMIT,
     });

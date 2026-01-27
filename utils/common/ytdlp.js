@@ -54,7 +54,7 @@ async function streamWithYtDlp(url) {
     }
 
     try {
-        const stream = new PassThrough();
+        const stream = new PassThrough({ highWaterMark: 10 * 1024 * 1024 }); // 10MB Buffer
         const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
         let stderr = "";
         let closed = false;

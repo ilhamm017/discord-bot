@@ -1,8 +1,10 @@
 const { AudioPlayerStatus } = require("@discordjs/voice");
-const { getGuildState, connectToVoice } = require("../voice");
+const { getGuildState, connectToVoice, getOrCreateState } = require("../voice");
 const { persistQueueState, notifyPanel } = require("./state");
 const { ensureQueueState, playNext } = require("./playback");
-const { loadQueueState, clearQueueState } = require("../../../storage/db");
+const { loadQueueState, clearQueueState, saveUserQueueHistory, loadUserQueueHistory } = require("../../../storage/db");
+const logger = require("../../../utils/logger");
+
 
 async function shuffleQueue(guildId) {
     const state = getGuildState(guildId);
@@ -19,6 +21,13 @@ async function shuffleQueue(guildId) {
 
     state.queue = state.queue.slice(0, start).concat(upcoming);
     await persistQueueState(state);
+
+    // Save history for current requester from shuffle
+    const currentTrack = state.queue[state.currentIndex];
+    if (currentTrack?.requestedById) {
+        await saveUserQueueHistory(currentTrack.requestedById, guildId, state);
+    }
+
     notifyPanel(state, "shuffle");
     return true;
 }
@@ -35,7 +44,17 @@ async function setRepeatMode(guildId, mode) {
 }
 
 async function enqueueTracks(voiceChannel, tracks, options = {}) {
-    const state = await connectToVoice(voiceChannel);
+    const PlayerManager = require("../PlayerManager");
+    const engineType = await PlayerManager.getEngineType(voiceChannel.guild.id);
+
+    let state;
+    if (engineType === "lavalink") {
+        state = getOrCreateState(voiceChannel.guild.id);
+        state.channelId = voiceChannel.id;
+    } else {
+        state = await connectToVoice(voiceChannel);
+    }
+
     ensureQueueState(state, voiceChannel.guild.id);
 
     if (options.textChannelId) {
@@ -55,17 +74,35 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
         };
     }
 
-    const startPosition = state.queue.length + 1;
+    const wasEmpty = state.queue.length === 0;
     state.queue.push(...entries);
     const added = entries.length;
+
+    // Ensure engine is set to help UI detection
+    if (!state.engine) {
+        const engine = await PlayerManager.getEngine(voiceChannel.guild.id);
+        state.engine = engine.type || "ffmpeg";
+    }
+
     await persistQueueState(state);
+    notifyPanel(state, "enqueue");
+
+    // Save User History
+    const requesterId = entries[entries.length - 1]?.requestedById;
+    if (requesterId) {
+        await saveUserQueueHistory(requesterId, voiceChannel.guild.id, state);
+    }
 
     let started = false;
-    if (state.player.state.status === AudioPlayerStatus.Idle) {
+    const isPlaying = await PlayerManager.isPlaying(voiceChannel.guild.id);
+
+    // Auto-start if nothing was playing OR queue was completely empty (meaning no loop running)
+    if (wasEmpty || !isPlaying) {
+        logger.info(`Auto-starting playback for guild ${voiceChannel.guild.id} (wasEmpty=${wasEmpty}, isPlaying=${isPlaying})`);
         started = Boolean(await playNext(state));
     }
 
-    return { state, added, startPosition, started };
+    return { state, added, started };
 }
 
 async function enqueueTrack(voiceChannel, track, options = {}) {
@@ -80,7 +117,18 @@ async function enqueueTrack(voiceChannel, track, options = {}) {
 
 async function restoreQueue(voiceChannel, options = {}) {
     const guildId = voiceChannel.guild.id;
-    const persisted = await loadQueueState(guildId);
+    const { userId } = options;
+
+    let persisted;
+    if (userId) {
+        persisted = await loadUserQueueHistory(userId, guildId);
+    }
+
+    if (!persisted) {
+        // Fallback to guild state if user state not found or not requested
+        persisted = await loadQueueState(guildId);
+    }
+
     if (
         !persisted ||
         !Array.isArray(persisted.queue) ||
@@ -105,6 +153,12 @@ async function restoreQueue(voiceChannel, options = {}) {
     state.playToken = (state.playToken || 0) + 1;
 
     await persistQueueState(state);
+
+    // Also update User History for this interaction
+    if (userId) {
+        await saveUserQueueHistory(userId, guildId, state);
+    }
+
     notifyPanel(state, "restore");
 
     return { restored: true, state, queueLength: state.queue.length };

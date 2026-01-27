@@ -1,7 +1,6 @@
 const { AudioPlayerStatus } = require("@discordjs/voice");
 const { enqueueTracks, getState } = require("../../../player/queue");
 const { updateControlPanel } = require("../../../player/panel");
-const { getFavoriteTracks } = require("../../../../storage/db");
 const logger = require("../../../../utils/logger");
 
 const FAVORITES_MIN_PLAYS = 5;
@@ -10,7 +9,7 @@ const FAVORITES_LIMIT = 20;
 const { getFavorites } = require("../../../../functions/tools/music/favorites_logic");
 
 async function handleFavorites(message, voiceChannel) {
-    const favorites = getFavorites(message.author.id, {
+    const favorites = await getFavorites(message.author.id, {
         minPlays: FAVORITES_MIN_PLAYS,
         limit: FAVORITES_LIMIT,
     });

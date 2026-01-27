@@ -1,166 +1,82 @@
-# Yova Discord Bot
+# Yova Discord Bot (V2 Modular)
 
-Yova adalah bot Discord dengan fitur musik, panel kontrol, favorit lagu, dan AI (Groq) untuk chat maupun perintah yang lebih fleksibel.
+Yova adalah bot Discord canggih yang dibangun dengan arsitektur modular, fitur musik performa tinggi menggunakan `yt-dlp`, dan integrasi AI (Groq) untuk interaksi yang lebih natural.
 
-## Fitur utama
-- Putar musik dari YouTube/YouTube Music (judul atau URL) + playlist. Pencarian judul menampilkan pilihan YT/Spotify.
-- Panel kontrol dengan tombol (prev/pause/next/stop/leave/shuffle/repeat/refresh) dan daftar antrian yang bisa dipilih.
-- Queue otomatis tersimpan ke SQLite agar tidak hilang saat crash, dengan restore manual.
-- Favorit global (1 server): lagu yang sering diputar naik ke atas dan bisa diputar lewat `yova play kesukaanku`.
-- AI chat dan perintah fleksibel: `yova <pesan bebas>` bisa dijawab AI atau dirutekan ke perintah yang sesuai.
-- Logging ke console + file log harian.
+## 🏗️ Arsitektur Baru
+Bot ini telah direfaktor untuk memisahkan tanggung jawab kode:
+- **`discord/tools/`**: Antarmuka perintah (Interaction Layer).
+- **`functions/platform/`**: Logika inti interaksi API platform (Discord).
+- **`functions/tools/`**: Logika bisnis "Pure" (Music engine, AI logic) yang platform-agnostic.
+- **`models/`**: Integrasi database (Sequelize/SQLite).
 
-## Instalasi & konfigurasi
-1. Install dependency:
-```bash
-npm install
-```
+## ✨ Fitur Utama
+- **Musik Pro**: Putar dari YouTube/Spotify. Dilengkapi **Panel Kontrol Interaktif** dan sistem antrian yang persisten (tidak hilang saat bot restart).
+- **AI Router**: Bot memahami bahasa manusia. Anda bisa memerintah bot secara natural tanpa menghafal prefix.
+- **Moderasi Lengkap**: Fitur Ban, Timeout, dan Role Management yang terintegrasi dengan audit log.
+- **Persona Unik**: Fitur `ucapkan` yang memungkinkan bot meniru gaya bicara member lain lewat AI.
+- **Smart Summary**: Merangkum percakapan panjang di channel agar Anda tetap *up-to-date*.
 
-2. Isi `config.json` (contoh):
-```json
-{
-  "token": "DISCORD_BOT_TOKEN",
-  "prefix": "yova",
-  "groq_api_key": "GROQ_API_KEY",
-  "groq_model": "llama-3.1-8b-instant",
-  "groq_model_fallbacks": [
-    "llama-3.3-70b-versatile",
-    "openai/gpt-oss-120b",
-    "moonshotai/kimi-k2-instruct",
-    "moonshotai/kimi-k2-instruct-0905",
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "qwen/qwen3-32b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "openai/gpt-oss-20b",
-    "groq/compound",
-    "groq/compound-mini",
-    "llama-3.1-8b-instant"
-  ],
-  "groq_context_messages": 6
-}
-```
+## 🚀 Instalasi & Konfigurasi
 
-Opsional:
-- `default_voice_channel`: nama atau ID voice channel default untuk perintah `join`.
-- `spotify_client_id`: Spotify Client ID (untuk resolve metadata).
-- `spotify_client_secret`: Spotify Client Secret.
-- `search_results_limit_youtube`: jumlah hasil YouTube saat cari judul.
-- `search_results_limit_spotify`: jumlah hasil Spotify saat cari judul.
-- `search_select_ttl_ms`: durasi menu pilihan hasil pencarian (ms).
-- `typing_delay_enabled`: aktifkan efek mengetik sebelum bot membalas.
-- `typing_delay_min_ms` / `typing_delay_max_ms`: rentang delay dasar efek mengetik.
-- `typing_delay_per_char_ms`: tambahan delay per karakter.
-- `ai_memory_enabled`: simpan memori otomatis (preferensi ringan dari chat).
-- `ai_memory_max_items`: jumlah memori yang dimasukkan ke prompt.
-- `ai_memory_ttl_days`: umur maksimal memori dalam hari (0 = tidak kedaluwarsa).
-- `guild_members_fetch_mode`: mode fetch member untuk AI context (`sample`, `full`, `off`).
-- `guild_members_fetch_cooldown_ms`: jeda fetch member agar tidak terlalu sering.
-- `channel_summary_message_limit`: jumlah pesan default untuk `ringkas`.
-- `channel_summary_message_max_limit`: batas maksimal pesan yang bisa diringkas.
-- `channel_summary_max_chars_per_message`: batas panjang per pesan untuk ringkasan.
+1. **Install Dependency**:
+   ```bash
+   npm install
+   ```
 
-3. Pastikan intent Discord sudah aktif di Developer Portal:
-- Message Content Intent (untuk membaca pesan).
-- Server Members Intent (untuk info anggota di AI).
+2. **Konfigurasi `config.json`**:
+   ```json
+   {
+     "token": "DISCORD_BOT_TOKEN",
+     "prefix": "yova",
+     "groq_api_key": "GROQ_API_KEY",
+     "groq_model": "llama-3.3-70b-versatile"
+   }
+   ```
+   *Lihat `config.json.example` (jika ada) untuk opsi lengkap seperti fitur memori AI dan limit pencarian.*
 
-4. Jalankan bot:
-```bash
-npm start
-```
+3. **Pastikan Privileged Intents Aktif** di Discord Developer Portal:
+   - Message Content Intent
+   - Server Members Intent
 
-## Docker (opsional)
-Pastikan `config.json` sudah terisi di host.
+4. **Jalankan Bot**:
+   ```bash
+   npm start
+   ```
 
-```bash
-docker compose up -d --build
-```
+## 🛠️ Daftar Perintah (Prefix: `yova`)
 
-Data persisten:
-- `./.data` untuk SQLite dan yt-dlp cache
-- `./logs` untuk log harian
+### 🛡️ Moderasi & General
+- `yova ping`: Cek latensi bot.
+- `yova memberinfo [@member]`: Detail info profil dan role member.
+- `yova addrole <role> @member`: Tambah role ke member.
+- `yova removerole <role> @member`: Hapus role dari member.
+- `yova ban @member [alasan]`: Ban member dari server.
+- `yova timeout @member <menit>`: Kasih timeout ke member.
 
-Catatan: yt-dlp akan otomatis diunduh ke `.data/yt-dlp` saat pertama kali streaming.
+### 🎵 Musik
+- `yova play <judul|url>`: Putar lagu (YouTube/Spotify). Menampilkan menu pilihan jika mencari judul.
+- `yova play kesukaanku`: Putar playlist lagu terfavorit di server.
+- `yova kontrol`: Tampilkan panel kontrol musik (tombol Play/Pause/Skip/Stop/Shuffle).
+- `yova queue`: Lihat antrian lagu.
+- `yova restore`: Pulihkan antrian terakhir dari database.
+- `yova join | leave`: Masuk atau keluar dari voice channel.
 
-## Daftar perintah
-Semua perintah memakai prefix dari `config.json` (contoh `yova`).
+### 🤖 AI
+- `yova <pesan bebas>`: Chat dengan AI atau perintah natural.
+- `yova ringkas [n]`: Rangkum `n` pesan terakhir di channel.
+- `yova ucapkan <pesan> @member`: Kirim pesan AI dengan meniru gaya bicara `@member`.
+- `yova panggil aku <nama>`: Simpan nama panggilan Anda untuk AI.
 
-### Musik
-- `yova play <judul|url>`: cari lagu dan pilih hasil (YT/Spotify), atau putar langsung jika URL.
-- `yova play <spotify url>`: putar lagu/playlist/album Spotify (dipetakan ke YouTube).
-- `yova play kesukaanku`: putar daftar favorit global (>= 5 kali diputar).
-- `yova join <nama_channel|@user|default>`: bot masuk ke voice channel.
-- `yova pause`: pause/resume.
-- `yova skip` / `yova next`: lewati lagu.
-- `yova sebelumnya`: kembali ke lagu sebelumnya.
-- `yova stop`: stop dan kosongkan antrian.
-- `yova leave`: keluar dari voice channel.
-- `yova kontrol`: tampilkan panel kontrol musik.
-- `yova restore`: restore antrian dari database (tanpa auto-play).
+## 📂 Struktur Folder
+- `discord/`: Berisi client, event handler, dan tools khusus Discord.
+- `functions/`: Inti dari semua logika bot (Platform & Tools).
+- `models/`: Definisi tabel database (SQLite).
+- `storage/`: Konfigurasi database.
+- `utils/`: Utility umum (Logger, AI Client, Formatting).
+- `.data/`: Lokasi penyimpanan database dan binary `yt-dlp`.
+- `logs/`: File log harian.
 
-### Favorit
-- `yova kesukaanku`: lihat daftar favorit.
-- `yova kesukaanku hapus <nomor|url>`: hapus favorit dari daftar.
-
-### AI
-- `yova ucapkan <pesan> @user`: buat pesan otomatis untuk target.
-- `yova panggil aku <nama>`: simpan panggilan untuk kamu (dipakai AI).
-- `yova <pesan bebas>`: AI chat atau AI merutekan ke perintah yang diizinkan.
-- `yova jelaskan dirimu`: tampilkan ringkasan fitur bot.
-- `yova ringkas [n]` / `yova rangkum [n]`: ringkas chat terbaru di channel.
-- `yova member awal|baru|daftar|jumlah [n]`: info member server.
-- `yova cek member ...`: alias untuk `member`.
-
-Perintah yang bisa dirutekan AI: `play`, `pause`, `skip`, `next`, `sebelumnya`, `stop`, `leave`, `kontrol`, `kesukaanku`, `restore`, `ucapkan`.
-
-## Panel kontrol musik
-Panel menampilkan info lagu (judul, durasi, requester, status repeat) dan daftar antrian.
-Kontrol tombol:
-- Prev, Pause/Resume, Next
-- Stop, Leave
-- Shuffle
-- Repeat lagu (loop track)
-- Repeat playlist (loop all)
-- Refresh panel
-
-Daftar antrian dapat dipilih untuk memutar nomor tertentu. Jika antrian panjang, gunakan tombol Queue Prev/Next untuk pindah halaman.
-
-## Cara kerja singkat
-1. **Parsing perintah**: `index.js` membaca pesan yang diawali prefix.
-2. **Routing**:
-   - Jika command valid → langsung dieksekusi.
-   - Jika tidak ditemukan → AI router menentukan balasan atau merutekan ke command.
-3. **Streaming musik**:
-   - `play` menambah antrian dan menghubungkan bot ke voice channel.
-   - Audio stream dibuat via `yt-dlp` (fallback), lalu diputar lewat `@discordjs/voice`.
-   - Auto-next, repeat track/playlist, serta auto-skip ketika error.
-   - Link Spotify hanya dipakai sebagai metadata, playback tetap dari YouTube.
-4. **Persistence**:
-   - Queue dan state tersimpan di SQLite (`.data/bot.db`).
-   - `restore` memuat antrian kembali tanpa langsung memutar.
-5. **Favorit**:
-   - Setiap lagu yang sukses diputar akan menaikkan hitungan.
-   - Lagu dengan jumlah putar >= 5 muncul di `kesukaanku`.
-6. **AI**:
-   - `ucapkan` mengambil konteks singkat dari target untuk meniru gaya.
-   - Panggilan user bisa disimpan agar AI memanggil nama tertentu.
-   - Chat AI bisa membalas pertanyaan atau menjalankan command tertentu.
-   - Fallback model otomatis kalau rate limit/overload (atur di `groq_model_fallbacks`).
-   - AI hanya punya data member dari cache (tergantung intent).
-
-## Logging
-Log ada di console dan file `logs/bot-YYYY-MM-DD.log`.
-Pengaturan:
-- `LOG_LEVEL=debug|info|warn|error`
-- `LOG_TO_FILE=true|false`
-
-## Struktur folder singkat
-- `commands/`: semua command bot.
-- `music/`: queue, panel, voice, dan streaming.
-- `storage/`: SQLite persistence.
-- `utils/`: logger, Groq, AI chat.
-- `docs/BOT_HELP.md`: ringkasan fitur untuk ditampilkan di chat.
-
-## Catatan penting
-- Jika ada error 403 dari YouTube, biasanya berasal dari akses stream yang dibatasi. Coba ulang atau ganti sumber lagu.
-- Info anggota server bergantung pada cache dan intent Discord. Jika kosong, aktifkan Server Members Intent.
-- Spotify tidak bisa diputar langsung (DRM). Bot memakai judul/artis Spotify untuk mencari lagu di YouTube.
+## 📝 Catatan
+- **yt-dlp**: Akan otomatis diunduh ke folder `.data/` saat pertama kali fitur musik digunakan.
+- **Link Spotify**: Spotify digunakan sebagai metadata; bot akan mencari audio yang paling cocok di YouTube untuk diputar.
+- **AI Context**: Menggunakan pesan terbaru di channel sebagai referensi (konfigurasi di `config.json`).

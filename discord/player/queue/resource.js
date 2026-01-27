@@ -95,7 +95,8 @@ async function createResource(track) {
     await getTrackInfo(track);
 
     try {
-        let fallbackStream = await streamWithYtDlp(track.url);
+        const fallbackStream = await streamWithYtDlp(track.url);
+
         try {
             const probe = await demuxProbe(fallbackStream);
             return createAudioResource(probe.stream, { inputType: probe.type });

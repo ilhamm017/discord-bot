@@ -8,6 +8,7 @@ const {
   listUserMemory,
   loadQueueState,
 } = require("../../storage/db");
+const { searchWeb } = require("../../functions/platform/core_logic");
 const { answerBotQuestion, isBotQuestion } = require("../common/bot_docs");
 const { getState } = require("../../discord/player/queue");
 let config = {};
@@ -72,26 +73,44 @@ const MEMBER_FETCH_COOLDOWN_MS = Number.isInteger(
   ? config.guild_members_fetch_cooldown_ms
   : 10 * 60 * 1000;
 const lastMemberFetchAt = new Map();
-const AI_COMMANDS = [
-  "play",
-  "pause",
-  "skip",
-  "next",
-  "sebelumnya",
-  "stop",
-  "leave",
-  "kontrol",
-  "kesukaanku",
-  "restore",
-  "ucapkan",
-  "panggil",
-  "join",
-  "jelaskan",
-  "member",
+const AI_COMMANDS_FALLBACK = [
+  "addrole",
+  "ban",
   "cek",
-  "ringkas",
+  "jelaskan",
+  "join",
+  "kesukaanku",
+  "kontrol",
+  "leave",
+  "member",
+  "memberinfo",
+  "next",
+  "panggil",
+  "pause",
+  "ping",
+  "play",
   "rangkum",
+  "removerole",
+  "restore",
+  "ringkas",
+  "sebelumnya",
+  "skip",
+  "stop",
+  "timeout",
+  "ucapkan",
 ];
+
+function getAiCommandList(message) {
+  const commands = message?.client?.commands;
+  if (commands && typeof commands.keys === "function") {
+    const list = Array.from(commands.keys())
+      .map((name) => String(name).toLowerCase())
+      .filter(Boolean);
+    const unique = Array.from(new Set(list));
+    if (unique.length) return unique.sort();
+  }
+  return AI_COMMANDS_FALLBACK.slice();
+}
 
 function sanitizeMessage(text) {
   if (!text) return "";
@@ -99,6 +118,198 @@ function sanitizeMessage(text) {
     .replace(/@everyone/gi, "@\u200beveryone")
     .replace(/@here/gi, "@\u200bhere")
     .trim();
+}
+
+function getHistoryMessageLimit() {
+  return Math.max(80, Math.min(AI_HISTORY_MAX_CHARS, 1200));
+}
+
+function normalizeReplyContext(text) {
+  const cleaned = String(text || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  const maxChars = getHistoryMessageLimit();
+  return cleaned.slice(0, maxChars);
+}
+
+const CHANNEL_CONTEXT_PATTERNS = [
+  /\bsiapa\b/i,
+  /\bbarusan\b/i,
+  /\btadi\b.*\b(kenapa|ngapain|apa|bahas|dibahas|ngomong|rame|ramai)\b/i,
+  /\b(ngomongin|dibahas|bahas|topik|diskusi|riwayat|timeline)\b/i,
+  /\b(di|dalam)\s+(chat|channel|ruangan|room|server)\b/i,
+  /\b(orang lain|yang lain|member|anggota|kalian|teman|temen|pada)\b/i,
+];
+
+const PERSON_CONTEXT_PATTERNS = [
+  /\b(kenapa|ngapain|ngapa|gimana|gmn|dimana|di mana|barusan|tadi|lagi)\b/i,
+  /\b(ada apa|kenapa)\b/i,
+  /\b(masalah|drama|ribut|berantem|salah|problem)\b/i,
+];
+
+const NAME_TOKEN_MIN_LEN = 3;
+const NAME_FUZZY_MIN_LEN = 4;
+const NAME_STOPWORDS = new Set([
+  "yang",
+  "tadi",
+  "barusan",
+  "kenapa",
+  "gimana",
+  "gmn",
+  "dimana",
+  "siapa",
+  "apa",
+  "itu",
+  "di",
+  "ke",
+  "dari",
+  "grup",
+  "group",
+  "chat",
+  "channel",
+  "ruangan",
+  "room",
+  "server",
+  "member",
+  "anggota",
+  "orang",
+  "teman",
+  "temen",
+  "kalian",
+  "pada",
+  "masalah",
+  "topik",
+  "diskusi",
+  "ngomong",
+  "bahas",
+  "dibahas",
+  "ngomongin",
+  "ada",
+]);
+
+function normalizeNameText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function extractNameTokens(prompt) {
+  const normalized = normalizeNameText(prompt);
+  if (!normalized) return [];
+  const tokens = normalized
+    .split(/\s+/)
+    .filter((token) => token.length >= NAME_TOKEN_MIN_LEN)
+    .filter((token) => !NAME_STOPWORDS.has(token));
+  return Array.from(new Set(tokens));
+}
+
+function resolveMemberFromText(message, prompt) {
+  const tokens = extractNameTokens(prompt);
+  if (!tokens.length) return null;
+  const members = message?.guild?.members?.cache;
+  if (!members || members.size === 0) return null;
+
+  let bestScore = 0;
+  let bestMember = null;
+  let isTie = false;
+
+  for (const member of members.values()) {
+    if (member.user?.bot) continue;
+    const names = [
+      member.displayName,
+      member.user?.globalName,
+      member.user?.username,
+    ].filter(Boolean);
+    if (!names.length) continue;
+
+    let score = 0;
+    for (const rawName of names) {
+      const normalizedName = normalizeNameText(rawName);
+      if (!normalizedName) continue;
+      const parts = normalizedName.split(/\s+/).filter(Boolean);
+      for (const token of tokens) {
+        if (parts.includes(token)) {
+          score = Math.max(score, 3);
+        } else if (
+          token.length >= NAME_FUZZY_MIN_LEN &&
+          parts.some((part) => part.startsWith(token))
+        ) {
+          score = Math.max(score, 2);
+        } else if (
+          token.length >= NAME_FUZZY_MIN_LEN + 1 &&
+          normalizedName.includes(token)
+        ) {
+          score = Math.max(score, 1);
+        }
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMember = member;
+      isTie = false;
+    } else if (score === bestScore && score > 0) {
+      isTie = true;
+    }
+  }
+
+  if (!bestMember || isTie) return null;
+  if (bestScore < 2) return null;
+  return {
+    id: bestMember.user?.id,
+    displayName:
+      bestMember.displayName ||
+      bestMember.user?.globalName ||
+      bestMember.user?.username ||
+      "User",
+  };
+}
+
+function getChannelContextScope(message, prompt) {
+  const mentions = message?.mentions;
+  if (mentions?.users?.size) {
+    const ids = Array.from(mentions.users.keys()).filter(Boolean);
+    return { includeOthers: true, allowedAuthorIds: ids.length ? ids : null };
+  }
+  if (mentions?.roles?.size) {
+    return { includeOthers: true, allowedAuthorIds: null };
+  }
+  if (mentions?.everyone || mentions?.here) {
+    return { includeOthers: true, allowedAuthorIds: null };
+  }
+  if (!prompt) {
+    return { includeOthers: false, allowedAuthorIds: null };
+  }
+  const hasChannelIntent = CHANNEL_CONTEXT_PATTERNS.some((pattern) =>
+    pattern.test(prompt)
+  );
+  const hasPersonIntent = PERSON_CONTEXT_PATTERNS.some((pattern) =>
+    pattern.test(prompt)
+  );
+
+  if (hasPersonIntent) {
+    const resolved = resolveMemberFromText(message, prompt);
+    if (resolved?.id) {
+      return { includeOthers: true, allowedAuthorIds: [resolved.id] };
+    }
+  }
+
+  if (hasChannelIntent) {
+    return { includeOthers: true, allowedAuthorIds: null };
+  }
+
+  return { includeOthers: false, allowedAuthorIds: null };
+}
+
+function formatHistoryForRouter(history) {
+  if (!Array.isArray(history) || history.length === 0) return "";
+  return history
+    .map((item) => {
+      const label =
+        item.role === "assistant" ? "Yova" : item.authorName || "User";
+      return `${label}: ${item.content}`;
+    })
+    .join("\n");
 }
 
 function sanitizeCallName(rawName, maxLen = 24) {
@@ -136,6 +347,7 @@ async function getAuthorCallName(message) {
 }
 
 function replaceGenericCall(text, callName) {
+  if (typeof text !== "string" || !text) return text || "";
   if (!callName) return text;
   return text.replace(/\bbro\b/gi, callName);
 }
@@ -379,12 +591,12 @@ function describeMember(member) {
     ? Array.from(member.roles.cache.values())
       .filter((role) => role.name !== "@everyone")
       .sort((a, b) => b.position - a.position)
-      .slice(0, 5)
+      .slice(0, 3)
       .map((role) => role.name)
     : [];
-  const name = member.displayName || member.user?.tag || "Unknown";
-  const roleText = roles.length ? `roles: ${roles.join(", ")}` : "roles: -";
-  return `${name} (${member.user?.id || "unknown"}, ${roleText})`;
+  const name = member.displayName || member.user?.globalName || member.user?.username || "User";
+  const roleText = roles.length ? roles.join(", ") : "-";
+  return `${name} (${roleText})`;
 }
 
 function formatRepeatMode(mode) {
@@ -420,7 +632,7 @@ function buildQueuePreview(queue, startIndex, limit = 3) {
   return list.length ? list.join(" | ") : "-";
 }
 
-function buildMusicContext(message) {
+async function buildMusicContext(message) {
   if (!message.guild) return "Music: (tidak tersedia)";
 
   const guild = message.guild;
@@ -455,7 +667,7 @@ function buildMusicContext(message) {
     ].join("\n");
   }
 
-  const stored = loadQueueState(guildId);
+  const stored = await loadQueueState(guildId);
   if (stored && Array.isArray(stored.queue) && stored.queue.length > 0) {
     const currentIndex = Number.isInteger(stored.currentIndex)
       ? stored.currentIndex
@@ -505,50 +717,48 @@ async function ensureMemberCache(guild) {
   }
 }
 
-function buildServerContext(message) {
-  if (!message.guild) return "Server: (tidak tersedia)";
+async function buildServerContext(message) {
+  if (!message.guild) return { server: "Server: (tidak tersedia)" };
 
   const guild = message.guild;
-  const ownerId = guild.ownerId || "-";
-  const ownerTag = guild.members?.cache?.get(ownerId)?.user?.tag || ownerId;
   const channelName = message.channel?.name || "-";
   const memberCount = guild.memberCount || "-";
   const roles = Array.from(guild.roles.cache.values())
     .filter((role) => role.name !== "@everyone")
     .sort((a, b) => b.position - a.position)
-    .slice(0, 10)
+    .slice(0, 5)
     .map((role) => role.name);
 
   const authorInfo = message.member ? describeMember(message.member) : "-";
   const mentionedMembers = message.mentions?.members
-    ? Array.from(message.mentions.members.values()).slice(0, 5)
+    ? Array.from(message.mentions.members.values()).slice(0, 3)
     : [];
   const mentionedInfo = mentionedMembers.length
     ? mentionedMembers.map((member) => describeMember(member)).join(" | ")
     : "-";
 
-  const knownMembers = guild.members?.cache
-    ? Array.from(guild.members.cache.values())
-      .filter((member) => !member.user?.bot)
-      .slice(0, MEMBER_SAMPLE_LIMIT)
-      .map((member) => describeMember(member))
-    : [];
+  const musicContext = await buildMusicContext(message);
 
-  return [
-    `Server: ${guild.name} (id: ${guild.id})`,
-    `Owner: ${ownerTag}`,
-    `Member count: ${memberCount}`,
-    `Channel: #${channelName}`,
-    `Roles (top): ${roles.length ? roles.join(", ") : "-"}`,
-    `Author: ${authorInfo}`,
-    `Mentioned: ${mentionedInfo}`,
-    `Members sample (cache): ${knownMembers.length ? knownMembers.join(" | ") : "-"}`,
-    "Catatan: data anggota bisa tidak lengkap (hanya cache).",
-    buildMusicContext(message),
-  ].join("\n");
+  return {
+    server: [
+      `Server: ${guild.name}`,
+      `Member count: ${memberCount}`,
+      `Channel: #${channelName}`,
+      `Roles: ${roles.length ? roles.join(", ") : "-"}`,
+    ].join("\n"),
+    author: `Author: ${authorInfo}`,
+    mentioned: `Mentioned: ${mentionedInfo}`,
+    music: musicContext,
+  };
 }
 
-async function getChatHistory(channel, authorId, botId, excludeMessageId) {
+async function getChatHistory(
+  channel,
+  authorId,
+  botId,
+  excludeMessageId,
+  options = {}
+) {
   if (!channel?.messages?.fetch) return [];
   if (!authorId || !botId) return [];
   if (AI_CONTEXT_LIMIT <= 0) return [];
@@ -562,26 +772,47 @@ async function getChatHistory(channel, authorId, botId, excludeMessageId) {
     return [];
   }
 
+  const includeOthers = options.includeOthers === true;
+  const includeAuthorNames = options.includeAuthorNames === true;
+  const allowedAuthorIds = Array.isArray(options.allowedAuthorIds)
+    ? new Set(options.allowedAuthorIds.filter(Boolean))
+    : null;
   const prefixLower = prefix.toLowerCase();
   const messages = Array.from(fetched.values())
     .filter((msg) => msg.id !== excludeMessageId)
-    .filter(
-      (msg) => msg.author?.id === authorId || msg.author?.id === botId
-    )
     .filter((msg) => {
       const content = msg.content?.trim();
       if (!content) return false;
       if (content.toLowerCase().startsWith(prefixLower)) return false;
+      const isAuthor = msg.author?.id === authorId;
+      const isBot = msg.author?.id === botId;
+      if (isAuthor || isBot) return true;
+      if (!includeOthers) return false;
+      if (msg.author?.bot) return false;
+      if (allowedAuthorIds) {
+        return allowedAuthorIds.has(msg.author?.id);
+      }
       return true;
     })
     .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
     .slice(-AI_CONTEXT_LIMIT);
 
-  const maxChars = Math.max(80, Math.min(AI_HISTORY_MAX_CHARS, 1200));
-  return messages.map((msg) => ({
-    role: msg.author?.id === botId ? "assistant" : "user",
-    content: msg.content.trim().slice(0, maxChars),
-  }));
+  const maxChars = getHistoryMessageLimit();
+  return messages.map((msg) => {
+    const entry = {
+      role: msg.author?.id === botId ? "assistant" : "user",
+      content: msg.content.trim().slice(0, maxChars),
+      timestamp: msg.createdTimestamp
+    };
+    if (includeAuthorNames) {
+      entry.authorName =
+        msg.member?.displayName ||
+        msg.author?.globalName ||
+        msg.author?.username ||
+        "User";
+    }
+    return entry;
+  });
 }
 
 async function generateAiReply(message, prompt, options = {}) {
@@ -616,8 +847,25 @@ async function generateAiReply(message, prompt, options = {}) {
     message.channel,
     authorId,
     botId,
-    message.id
+    message.id,
+    {
+      includeOthers: options.includeOthers,
+      allowedAuthorIds: options.allowedAuthorIds,
+    }
   );
+  const replyContext = normalizeReplyContext(options.replyContext);
+  const historyHasReply =
+    replyContext &&
+    history.some(
+      (item) => item.role === "assistant" && item.content === replyContext
+    );
+  const messages = historyHasReply || !replyContext
+    ? [...history, { role: "user", content: prompt }]
+    : [
+      ...history,
+      { role: "assistant", content: replyContext },
+      { role: "user", content: prompt },
+    ];
   const serverContext = options.serverContext;
 
   let content;
@@ -626,7 +874,7 @@ async function generateAiReply(message, prompt, options = {}) {
       system: serverContext
         ? `${systemPrompt}${memoryContext}\n\nInformasi server:\n${serverContext}`
         : `${systemPrompt}${memoryContext}`,
-      messages: [...history, { role: "user", content: prompt }],
+      messages,
       temperature: AI_TEMPERATURE,
       maxTokens: AI_MAX_TOKENS,
     });
@@ -653,9 +901,11 @@ async function generateAiReply(message, prompt, options = {}) {
   return output;
 }
 
-async function handleAiRequest(message, prompt) {
+async function handleAiRequest(message, prompt, options = {}) {
   const userId = message.author?.id;
+  const botId = message.client?.user?.id;
   const preference = parseCallNameInstruction(prompt);
+  const replyContext = normalizeReplyContext(options.replyContext);
   if (userId && preference?.action === "set" && preference.value) {
     await setUserCallName(userId, preference.value);
     return {
@@ -703,23 +953,81 @@ async function handleAiRequest(message, prompt) {
   if (message.guild) {
     await ensureMemberCache(message.guild);
   }
-  const serverContext = buildServerContext(message);
+  const serverContext = await buildServerContext(message);
+  const { includeOthers, allowedAuthorIds } = getChannelContextScope(
+    message,
+    prompt
+  );
+  const history = await getChatHistory(
+    message.channel,
+    userId,
+    botId,
+    message.id,
+    {
+      includeOthers,
+      allowedAuthorIds,
+      includeAuthorNames: true,
+    }
+  );
+  const historyText = formatHistoryForRouter(history);
+  const allowedCommands = getAiCommandList(message);
+  const commandHints = [];
+  if (allowedCommands.includes("play")) {
+    commandHints.push(
+      "Jika pengguna meminta memutar musik, gunakan command play dan isi args dengan judul/URL."
+    );
+  }
+  if (allowedCommands.includes("join")) {
+    commandHints.push(
+      "Jika pengguna meminta bot masuk/join voice, gunakan command join dan isi args dengan nama channel atau mention user."
+    );
+  }
+  if (allowedCommands.includes("jelaskan")) {
+    commandHints.push("Jika pengguna meminta penjelasan bot, gunakan command jelaskan.");
+  }
+  if (allowedCommands.includes("member")) {
+    commandHints.push(
+      "Jika pengguna minta cek member/anggota server (awal/baru/daftar/jumlah), gunakan command member."
+    );
+  }
+  if (allowedCommands.includes("ringkas") || allowedCommands.includes("rangkum")) {
+    commandHints.push(
+      `Jika pengguna minta ringkas/rangkum channel, gunakan command ${allowedCommands.includes("ringkas") ? "ringkas" : "rangkum"
+      }.`
+    );
+  }
+  if (allowedCommands.includes("memberinfo")) {
+    commandHints.push(
+      "Jika pengguna minta info detail tentang member tertentu, gunakan command memberinfo."
+    );
+  }
+  if (allowedCommands.includes("addrole") || allowedCommands.includes("removerole")) {
+    commandHints.push(
+      "Jika pengguna minta tambah/hapus role, gunakan command addrole/removerole."
+    );
+  }
+  if (allowedCommands.includes("timeout") || allowedCommands.includes("ban")) {
+    commandHints.push(
+      "Jika pengguna minta moderasi (timeout/ban), gunakan command timeout/ban."
+    );
+  }
+  if (allowedCommands.includes("ping")) {
+    commandHints.push("Jika pengguna minta uji bot, gunakan command ping.");
+  }
   const routerSystem =
     "Kamu adalah router AI untuk bot Discord. " +
     "Selalu jawab dengan JSON valid saja tanpa teks lain. " +
     "Skema: {\"type\":\"command\",\"name\":\"<command>\",\"args\":[\"...\"]} " +
-    "atau {\"type\":\"reply\",\"message\":\"...\"}. " +
+    "atau {\"type\":\"reply\",\"message\":\"...\"} " +
+    "atau {\"type\":\"search\",\"query\":\"...\"}. " +
     "Command yang diizinkan: " +
-    AI_COMMANDS.join(", ") +
+    allowedCommands.join(", ") +
     ". " +
-    "Jika pengguna meminta memutar musik, gunakan command play dan isi args dengan judul/URL. " +
-    "Jika pengguna meminta bot masuk/join voice, gunakan command join dan isi args dengan nama channel atau mention user. " +
-    "Jika pengguna meminta penjelasan bot, gunakan command jelaskan. " +
-    "Jika pengguna minta cek member/anggota server (awal/baru/daftar/jumlah), gunakan command member. " +
-    "Jika pengguna minta ringkas/rangkum channel, gunakan command ringkas. " +
+    (commandHints.length ? `${commandHints.join(" ")} ` : "") +
     "Jika pengguna bertanya/bercakap-cakap, gunakan type reply dan tulis jawaban. " +
     "Jika pengguna meminta info server atau musik yang sedang diputar, jawab dengan type reply berdasarkan info yang tersedia. " +
-    "Jika data tidak tersedia, katakan tidak punya akses. " +
+    "Jika pengguna bertanya hal eksternal/real-time (berita, harga crypto/saham, cuaca, fakta umum), GUNAKAN type search. " +
+    "Jangan menolak menjawab jika bisa dicari di web. " +
     "Persona: chibi/tsundere/kamidere vibe yang imut tapi sombong dan lucu; kadang pamer diri. " +
     "Jangan menyebut diri anak/bocil/loli, tetap dewasa. " +
     "Gaya reply: gaul internet, nyinyir tipis, sedikit sarkas, gampang diajak bercanda, " +
@@ -737,6 +1045,8 @@ async function handleAiRequest(message, prompt) {
   const routerUser =
     `Pesan pengguna: "${prompt}"\n` +
     (callName ? `Nama panggilan penanya: "${callName}".\n` : "") +
+    (replyContext ? `Konteks pesan bot yang direply:\n${replyContext}\n` : "") +
+    (historyText ? `Riwayat chat terbaru:\n${historyText}\n` : "") +
     (memorySummary ? `\n${memorySummary}\n` : "\n") +
     `Informasi server:\n${serverContext}`;
 
@@ -756,7 +1066,7 @@ async function handleAiRequest(message, prompt) {
   const parsed = extractJson(raw);
   if (parsed?.type === "command" && typeof parsed.name === "string") {
     const name = parsed.name.toLowerCase();
-    if (!AI_COMMANDS.includes(name)) {
+    if (!allowedCommands.includes(name)) {
       return { type: "reply", message: "" };
     }
 
@@ -770,6 +1080,31 @@ async function handleAiRequest(message, prompt) {
     return { type: "command", name, args, serverContext };
   }
 
+  if (parsed?.type === "search" && typeof parsed.query === "string") {
+    let searchResults = [];
+    try {
+      searchResults = await searchWeb(parsed.query);
+    } catch (e) {
+      logger.error("Search failed inside router", e);
+    }
+
+    const searchContext = searchResults.length > 0
+      ? searchResults.map(r => `[${r.title}](${r.url}): ${r.snippet}`).join("\n\n")
+      : "Tidak ada hasil pencarian ditemukan.";
+
+    const enrichedContext = serverContext + "\n\n=== HASIL PENCARIAN WEB ===\n" + searchContext + "\n===========================";
+
+    // Generate reply using the search results
+    const answer = await generateAiReply(message, prompt, {
+      serverContext: enrichedContext,
+      replyContext,
+      includeOthers,
+      allowedAuthorIds,
+    });
+
+    return { type: "reply", message: answer, serverContext: enrichedContext };
+  }
+
   if (parsed?.type === "reply" && typeof parsed.message === "string") {
     let messageText = sanitizeMessage(
       replaceGenericCall(parsed.message, callName)
@@ -778,11 +1113,23 @@ async function handleAiRequest(message, prompt) {
     return { type: "reply", message: messageText, serverContext };
   }
 
-  const fallback = await generateAiReply(message, prompt, { serverContext });
+  const fallback = await generateAiReply(message, prompt, {
+    serverContext,
+    replyContext,
+    includeOthers,
+    allowedAuthorIds,
+  });
   return { type: "reply", message: fallback, serverContext };
 }
 
 module.exports = {
   generateAiReply,
   handleAiRequest,
+  buildServerContext,
+  buildMemorySummary,
+  getAuthorCallName,
+  getChatHistory,
+  parseCallNameInstruction,
+  sanitizeMessage,
+  replaceGenericCall
 };

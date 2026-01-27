@@ -43,6 +43,7 @@ function getShortName(rawName) {
 
 function replaceGenericCall(text, callName) {
     if (!callName) return text;
+    if (typeof text !== "string") return "";
     return text.replace(/\bbro\b/gi, callName);
 }
 

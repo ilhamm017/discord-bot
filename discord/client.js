@@ -79,6 +79,14 @@ async function start() {
 
     try {
         await client.login(token);
+
+        // Wait for client.user to be defined (Ready state)
+        if (!client.user) {
+            await new Promise((resolve) => {
+                client.once("ready", () => resolve());
+            });
+        }
+
         logger.info("Discord client started successfully.");
     } catch (error) {
         logger.error("Failed to login to Discord.", error);

@@ -58,7 +58,7 @@ async function waitWithTyping(channel, text) {
   if (!cfg.enabled) return;
 
   const delay = computeTypingDelay(text);
-  if (delay <= 0) return;
+  if (typeof delay !== 'number' || delay <= 0) return;
 
   const interval = clamp(cfg.intervalMs, 2000, 9000);
   let remaining = delay;
@@ -70,7 +70,7 @@ async function waitWithTyping(channel, text) {
     await channel.sendTyping();
   }
   if (remaining > 0) {
-    await new Promise((resolve) => setTimeout(resolve, remaining));
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, remaining)));
   }
 }
 

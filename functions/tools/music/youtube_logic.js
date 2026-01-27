@@ -39,7 +39,8 @@ async function searchYoutube(query, limit, { searchWithFallback = true } = {}) {
         title: video?.title || video?.url,
         url: video?.url || video?.webpage_url || (video?.id ? `https://www.youtube.com/watch?v=${video.id}` : null),
         durationMs: getYoutubeDurationMs(video),
-        videoId: video?.id
+        videoId: video?.id,
+        thumbnail: video?.thumbnails?.[0]?.url || video?.thumbnail?.url || null
     })).filter(v => v.url);
 }
 

@@ -20,13 +20,13 @@ const MAX_CHARS_PER_MESSAGE = Number.isInteger(
 )
   ? config.channel_summary_max_chars_per_message
   : 200;
-const SUMMARY_MAX_TOKENS = Number.isFinite(Number(config.groq_summary_max_tokens))
-  ? Number(config.groq_summary_max_tokens)
+const SUMMARY_MAX_TOKENS = Number.isFinite(Number(config.google_summary_max_tokens || config.groq_summary_max_tokens))
+  ? Number(config.google_summary_max_tokens || config.groq_summary_max_tokens)
   : 260;
 const SUMMARY_TEMPERATURE = Number.isFinite(
-  Number(config.groq_summary_temperature)
+  Number(config.google_summary_temperature || config.groq_summary_temperature)
 )
-  ? Number(config.groq_summary_temperature)
+  ? Number(config.google_summary_temperature || config.groq_summary_temperature)
   : 0.2;
 
 const PREFIX = String(config.prefix || "!");

@@ -18,6 +18,7 @@ module.exports = {
     try {
       const result = await restoreQueue(voiceChannel, {
         textChannelId: message.channel.id,
+        userId: message.author.id,
       });
 
       if (!result.restored) {

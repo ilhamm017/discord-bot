@@ -14,6 +14,10 @@ const QueueState = sequelize.define("QueueState", {
         type: DataTypes.STRING,
         defaultValue: "off",
     },
+    engine: {
+        type: DataTypes.STRING,
+        defaultValue: "ffmpeg",
+    },
 });
 
 const QueueItem = sequelize.define("QueueItem", {
@@ -39,6 +43,10 @@ const QueueItem = sequelize.define("QueueItem", {
     },
     requestedByTag: {
         type: DataTypes.STRING,
+        allowNull: true,
+    },
+    metadataJson: {
+        type: DataTypes.TEXT,
         allowNull: true,
     },
 });

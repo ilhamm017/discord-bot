@@ -1,0 +1,62 @@
+server: # server settings
+  port: 2333
+  address: 0.0.0.0
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.16.0"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
+  server:
+    password: "youshallnotpass"
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      mixer: false
+      http: true
+      local: false
+    bufferDurationMs: 400 # 400ms buffer for better responsiveness
+    frameBufferDurationMs: 1000 # 1s frame buffer
+    opusEncodingQuality: 7 # Reduced slightly to save CPU/Bandwidth
+    resamplingQuality: MEDIUM # Lowered to MEDIUM to reduce CPU load
+    trackStuckThresholdMs: 10000 # The threshold for how long a track can be stuck. A stuck track will certainly stop playing eventually.
+    useSeekGhosting: true # Seek ghosting is a technique to prevent audio artifacts when seeking by applying a small crossfade.
+    youtubePlaylistLoadLimit: 6 # Number of pages at 100 per page
+    playerUpdateInterval: 5 # How frequently to send player updates to clients, in seconds
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+    gc-warnings: true
+    #ratelimit:
+      #ipBlocks: ["1.0.0.0/8", "..."] # list of ip blocks
+      #excludedIps: ["1.1.1.1"] # ips which should be explicit excluded from usage by lavalink
+      #strategy: "RotateOnBan" # RotateOnBan | LoadBalance | NanoIp | RotatingNanoIp
+      #searchTriggersFail: true # Whether a search 429 should trigger marking the IP as banned
+      #retryLimit: -1 # -1 = use default lavalink value | 0 = no retry | >0 = retry limit
+
+youtube:
+  enabled: true
+  clients:
+    - MUSIC
+    - WEB
+    - TVHTML5_SIMPLY_EMBEDDED_PLAYER
+
+metrics:
+  prometheus:
+    enabled: false
+    endpoint: /metrics
+
+logging:
+  file:
+    path: ./logs/lavalink.log
+  level:
+    root: INFO
+    lavalink: INFO
+
+  request:
+    enabled: true
+    includeClientInfo: true
+    includeHeaders: false
+    includePayload: true
+    includeQueryString: true

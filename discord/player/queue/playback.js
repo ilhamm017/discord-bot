@@ -12,16 +12,29 @@ async function playIndexOnce(state, index) {
     state.playToken = (state.playToken || 0) + 1;
     const token = state.playToken;
 
-    let resource;
+    // Use PlayerManager to handle actual playback (Unified Queue)
+    const { client } = require("../../client");
+    const PlayerManager = require("../PlayerManager");
+
+    const channelId = state.channelId; // Voice channel ID
+    const channel = client.channels.cache.get(channelId);
+
+    if (!channel) {
+        logger.error(`Cannot play track: Voice channel ${channelId} not found.`);
+        throw new Error("Voice channel not found");
+    }
+
     try {
-        resource = await createResource(track);
+        await PlayerManager.play(state.guildId, channel, track);
     } catch (error) {
         throw error;
     }
+
     if (token !== state.playToken) return null;
 
     state.currentIndex = index;
-    state.player.play(resource);
+    // state.player.play(resource); // Handled by PlayerManager
+
     await persistQueueState(state);
     await recordPlay({
         userId: track?.requestedById,
@@ -94,7 +107,7 @@ async function playPrevious(state) {
     return playIndex(state, prevIndex, { allowWrap: false });
 }
 
-function skipTrack(guildId) {
+async function skipTrack(guildId) {
     const state = getGuildState(guildId);
     if (!state || !Array.isArray(state.queue)) return null;
 
@@ -137,7 +150,7 @@ function ensureQueueState(state, guildId) {
         state.repeatMode = "off";
     }
 
-    if (state.queueBound) return;
+    if (state.queueBound || !state.player) return;
     state.queueBound = true;
 
     state.player.on(AudioPlayerStatus.Idle, () => {
@@ -195,7 +208,8 @@ async function stopPlayback(guildId) {
     state.currentIndex = -1;
     state.playToken = (state.playToken || 0) + 1;
 
-    state.player.stop(true);
+    const PlayerManager = require("../PlayerManager");
+    await PlayerManager.stop(guildId);
     await clearQueueState(guildId);
     notifyPanel(state, "stop");
     return true;
@@ -206,30 +220,34 @@ async function leaveVoiceLocal(guildId) {
     return cleanupGuild(guildId);
 }
 
-function togglePause(guildId) {
+async function togglePause(guildId) {
     const state = getGuildState(guildId);
     if (!state) return { status: "not_found" };
 
-    const status = state.player.state.status;
-    if (
-        status === AudioPlayerStatus.Paused ||
-        status === AudioPlayerStatus.AutoPaused
-    ) {
-        state.player.unpause();
+    const PlayerManager = require("../PlayerManager");
+    const isPaused = await PlayerManager.isPaused(guildId);
+    const isPlaying = await PlayerManager.isPlaying(guildId);
+
+    if (isPaused) {
+        await PlayerManager.resume(guildId);
         notifyPanel(state, "resume");
         return { status: "resumed" };
     }
 
-    if (
-        status !== AudioPlayerStatus.Playing &&
-        status !== AudioPlayerStatus.Buffering
-    ) {
+    if (!isPlaying) {
+        // If not playing but we have a queue, try to start playback
+        // This helps after engine switches where playback stops
+        if (Array.isArray(state.queue) && state.queue.length > 0) {
+            const index = state.currentIndex >= 0 ? state.currentIndex : 0;
+            await playIndex(state, index);
+            return { status: "resumed" };
+        }
         return { status: "idle" };
     }
 
-    const paused = state.player.pause(true);
+    await PlayerManager.pause(guildId);
     notifyPanel(state, "pause");
-    return { status: paused ? "paused" : "failed" };
+    return { status: "paused" };
 }
 
 module.exports = {

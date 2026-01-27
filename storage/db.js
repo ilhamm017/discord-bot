@@ -30,6 +30,7 @@ async function saveQueueState(guildId, state) {
         guildId,
         currentIndex: state.currentIndex,
         repeatMode: state.repeatMode || "off",
+        engine: state.engine || "ffmpeg",
       }, { transaction: t });
 
       // 2. Overwrite Queue Items
@@ -42,6 +43,7 @@ async function saveQueueState(guildId, state) {
         title: track?.title || track?.url || "",
         requestedById: track?.requestedById || null,
         requestedByTag: track?.requestedByTag || null,
+        metadataJson: track?.info ? JSON.stringify(track.info) : null,
       }));
 
       if (items.length > 0) {
@@ -54,16 +56,6 @@ async function saveQueueState(guildId, state) {
 }
 
 function loadQueueState(guildId) {
-  // Note: The original code was synchronous. Sequelize is async.
-  // However, looking at the codebase, loadQueueState is often called in async contexts OR the result is needed immediately.
-  // Making this ASYNC would break the API signature if it was sync.
-  // BUT the original used `better-sqlite3` which is sync.
-  // Only solution is to wrap this in a way or change usages to await.
-  // Let's check usages of loadQueueState.
-  // Usages: queue.js (restoreQueue) -> awaits it? No `const persisted = loadQueueState(guildId)`
-  // Discord bot usually runs async. I should refactor callers to await this function.
-
-  // For now I will export an async version and I MUST UPDATE CALLERS.
   return loadQueueStateAsync(guildId);
 }
 
@@ -84,12 +76,14 @@ async function loadQueueStateAsync(guildId) {
       requestedById: item.requestedById || null,
       requestedByTag: item.requestedByTag || null,
       requestedBy: item.requestedByTag || item.requestedById || "-",
+      info: item.metadataJson ? JSON.parse(item.metadataJson) : null,
     }));
 
     return {
       queue,
       currentIndex: queueState.currentIndex,
       repeatMode: queueState.repeatMode || "off",
+      engine: queueState.engine || "ffmpeg",
     };
   } catch (error) {
     logger.error("Failed loading queue state (Sequelize).", error);
@@ -304,10 +298,57 @@ function initDatabase() {
   return connectDB();
 }
 
+const UserQueueHistory = require("../models/UserQueueHistory");
+
+// ... (existing imports)
+
+// -----------------------------------------------------------------------------
+// User Queue History (Personal Restore)
+// -----------------------------------------------------------------------------
+async function saveUserQueueHistory(userId, guildId, state) {
+  if (!userId || !guildId || !state || !state.queue) return;
+  try {
+    const payload = {
+      tracks: state.queue,
+      repeatMode: state.repeatMode || "off"
+    };
+
+    await UserQueueHistory.upsert({
+      userId,
+      guildId,
+      queueJson: JSON.stringify(payload),
+      currentIndex: state.currentIndex
+    });
+  } catch (error) {
+    logger.error("Failed saving user queue history.", error);
+  }
+}
+
+async function loadUserQueueHistory(userId, guildId) {
+  if (!userId || !guildId) return null;
+  try {
+    const history = await UserQueueHistory.findOne({
+      where: { userId, guildId }
+    });
+    if (!history) return null;
+
+    const payload = JSON.parse(history.queueJson);
+    return {
+      queue: payload.tracks || [],
+      currentIndex: history.currentIndex,
+      repeatMode: payload.repeatMode || "off"
+    };
+  } catch (error) {
+    logger.error("Failed loading user queue history.", error);
+    return null;
+  }
+}
+
 module.exports = {
+  // ... existing exports ...
   initDatabase,
   saveQueueState,
-  loadQueueState, // exported as sync wrapper that returns promise, careful!
+  loadQueueState,
   clearQueueState,
   recordPlay,
   getFavoriteTracks,
@@ -320,4 +361,6 @@ module.exports = {
   getSpotifyCache,
   addUserMemory,
   listUserMemory,
+  saveUserQueueHistory,
+  loadUserQueueHistory,
 };
