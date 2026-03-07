@@ -1,12 +1,64 @@
-const {
-  createAudioPlayer,
-  entersState,
-  joinVoiceChannel,
-  VoiceConnectionStatus,
-} = require("@discordjs/voice");
 const logger = require("../../utils/logger");
 
 const guildStates = new Map();
+
+function createDiagnostics() {
+  return {
+    lastVoiceServerUpdateAt: null,
+    lastVoicePatchAt: null,
+    lastVoiceSessionId: null,
+    lastVoiceChannelId: null,
+    lastReconnectAt: null,
+    lastDisconnectAt: null,
+    lastDisconnectCode: null,
+    lastPlayerPingMs: null,
+    lastPlayerPosition: null,
+    lastPlayerUpdateAt: null,
+    lastPositionDriftMs: null,
+  };
+}
+
+function createPlaybackHistory() {
+  return [];
+}
+
+function normalizePlaybackHistory(history) {
+  if (!Array.isArray(history)) return createPlaybackHistory();
+  return history.filter((item) => Boolean(item) && typeof item === "object");
+}
+
+function ensureDiagnostics(state) {
+  if (!state.diagnostics || typeof state.diagnostics !== "object") {
+    state.diagnostics = createDiagnostics();
+    return state.diagnostics;
+  }
+
+  const defaults = createDiagnostics();
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!(key in state.diagnostics)) {
+      state.diagnostics[key] = value;
+    }
+  }
+  return state.diagnostics;
+}
+
+function ensurePlaybackHistory(state) {
+  if (!Array.isArray(state.playHistory)) {
+    state.playHistory = createPlaybackHistory();
+  }
+  if (!("speechPlayback" in state)) {
+    state.speechPlayback = null;
+  }
+  if (!["queue", "history"].includes(state.panelView)) {
+    state.panelView = "queue";
+  }
+  if (!Number.isInteger(state.queuePage) || state.queuePage < 0) {
+    state.queuePage = 0;
+  }
+  if (!Number.isInteger(state.historyPage) || state.historyPage < 0) {
+    state.historyPage = 0;
+  }
+}
 
 function getOrCreateState(guildId) {
   let state = guildStates.get(guildId);
@@ -15,11 +67,39 @@ function getOrCreateState(guildId) {
       queue: [],
       currentIndex: -1,
       repeatMode: "off",
-      engine: null, // Will be set by PlayerManager
+      engine: "lavalink",
+      diagnostics: createDiagnostics(),
+      playHistory: createPlaybackHistory(),
+      speechPlayback: null,
+      panelView: "queue",
+      queuePage: 0,
+      historyPage: 0,
     };
     guildStates.set(guildId, state);
+  } else {
+    ensureDiagnostics(state);
+    ensurePlaybackHistory(state);
   }
   return state;
+}
+
+function setGuildPlaybackHistory(guildId, history) {
+  if (!guildId) return null;
+  const state = getOrCreateState(guildId);
+  state.playHistory = normalizePlaybackHistory(history);
+  if (state.historyPage >= state.playHistory.length && state.historyPage > 0) {
+    state.historyPage = 0;
+  }
+  return state;
+}
+
+async function hydratePlaybackHistories() {
+  const { loadAllGuildPlaybackHistories } = require("../../storage/db");
+  const rows = await loadAllGuildPlaybackHistories();
+  for (const row of rows) {
+    setGuildPlaybackHistory(row.guildId, row.history);
+  }
+  return rows.length;
 }
 
 function cleanupGuild(guildId) {
@@ -54,62 +134,20 @@ function cleanupGuild(guildId) {
   return true;
 }
 
-async function connectToVoice(channel) {
-  const guildId = channel.guild.id;
-  let state = getOrCreateState(guildId);
-
-  // If already connected to a DIFFERENT channel, clean up connection (but keep state)
-  if (state.connection && state.channelId !== channel.id) {
-    try { state.connection.destroy(); } catch (e) { }
-    state.connection = null;
-  }
-
-  if (!state.connection) {
-    const connection = joinVoiceChannel({
-      channelId: channel.id,
-      guildId,
-      adapterCreator: channel.guild.voiceAdapterCreator,
-      selfDeaf: true,
-    });
-
-    if (!state.player) {
-      state.player = createAudioPlayer();
-    }
-
-    connection.subscribe(state.player);
-
-    state.connection = connection;
-    state.channelId = channel.id;
-
-    connection.on(VoiceConnectionStatus.Disconnected, () => {
-      // Only cleanup if it's a real disconnect, not an engine switch
-      // For now, let's keep it simple.
-      state.connection = null;
-    });
-
-    state.player.on("error", (error) => {
-      logger.error(`Audio player error in guild ${guildId}.`, error);
-    });
-  }
-
-  try {
-    await entersState(state.connection, VoiceConnectionStatus.Ready, 20_000);
-  } catch (error) {
-    state.connection?.destroy();
-    state.connection = null;
-    throw error;
-  }
-
-  return state;
-}
-
 function getGuildState(guildId) {
-  return guildStates.get(guildId);
+  const state = guildStates.get(guildId);
+  if (!state) return state;
+  ensureDiagnostics(state);
+  ensurePlaybackHistory(state);
+  return state;
 }
 
 module.exports = {
   cleanupGuild,
-  connectToVoice,
+  ensureDiagnostics,
   getGuildState,
   getOrCreateState,
+  hydratePlaybackHistories,
+  normalizePlaybackHistory,
+  setGuildPlaybackHistory,
 };

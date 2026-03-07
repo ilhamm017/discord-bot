@@ -1,8 +1,125 @@
 const lavalinkService = require("../LavalinkManager");
 const logger = require("../../../utils/logger");
+const {
+    getPlaybackUrlForTrack,
+    primeMyInstantsTrack,
+    primeYoutubeTrack,
+} = require("../../../utils/common/media_cache");
 
 class LavalinkDriver {
     type = "lavalink";
+
+    async waitForConnected(player, timeoutMs = 5000) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            if (player.connected) return true;
+            await new Promise((r) => setTimeout(r, 200));
+        }
+        return Boolean(player.connected);
+    }
+
+    async waitForSessionId(player, timeoutMs = 4000) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            if (player?.voice?.sessionId) return player.voice.sessionId;
+            await new Promise((r) => setTimeout(r, 100));
+        }
+        return player?.voice?.sessionId || null;
+    }
+
+    isPlayerVoiceReady(player, voiceChannelId) {
+        return Boolean(
+            player &&
+            player.connected === true &&
+            player.voiceChannelId === voiceChannelId &&
+            player.voice?.sessionId
+        );
+    }
+
+    async createPlayer(manager, guildId, voiceChannelId) {
+        return manager.createPlayer({
+            guildId,
+            voiceChannelId,
+            textChannelId: null,
+            selfDeaf: true,
+            selfMute: false,
+            volume: 100,
+        });
+    }
+
+    async preparePlayerForChannel(player, voiceChannelId) {
+        if (player.voiceChannelId !== voiceChannelId) {
+            if (player.voiceChannelId) {
+                await player.changeVoiceState({
+                    voiceChannelId,
+                    selfDeaf: true,
+                    selfMute: false,
+                });
+            } else {
+                player.options.voiceChannelId = voiceChannelId;
+            }
+        }
+
+        if (!player.connected) {
+            player.options.voiceChannelId = voiceChannelId;
+            await player.connect();
+        }
+    }
+
+    async recreatePlayer(manager, guildId, voiceChannelId) {
+        const stalePlayer = manager.players.get(guildId);
+        if (stalePlayer) {
+            await stalePlayer.destroy().catch(() => { });
+        }
+        return this.createPlayer(manager, guildId, voiceChannelId);
+    }
+
+    async ensureVoiceReady(manager, guildId, voiceChannel) {
+        let player = manager.players.get(guildId);
+        if (!player) {
+            player = await this.createPlayer(manager, guildId, voiceChannel.id);
+        }
+
+        await this.preparePlayerForChannel(player, voiceChannel.id);
+
+        let connected = await this.waitForConnected(player, 6000);
+        let sessionId = connected ? await this.waitForSessionId(player, 3000) : null;
+
+        if (!connected || !sessionId || player.voiceChannelId !== voiceChannel.id) {
+            logger.warn(
+                `Lavalink voice not ready for guild ${guildId}; recreating player once.`,
+                {
+                    connected,
+                    voiceChannelId: player.voiceChannelId,
+                    expectedVoiceChannelId: voiceChannel.id,
+                    hasSessionId: Boolean(sessionId),
+                }
+            );
+
+            player = await this.recreatePlayer(manager, guildId, voiceChannel.id);
+            await this.preparePlayerForChannel(player, voiceChannel.id);
+            connected = await this.waitForConnected(player, 6000);
+            sessionId = connected ? await this.waitForSessionId(player, 4000) : null;
+        }
+
+        if (!connected || !sessionId || player.voiceChannelId !== voiceChannel.id) {
+            const closeInfo = lavalinkService.getLastVoiceClose(guildId);
+            if (closeInfo?.code === 4017) {
+                throw new Error(
+                    "LAVALINK_DAVE_REQUIRED: Discord voice menolak koneksi Lavalink " +
+                    "(E2EE/DAVE protocol required). Upgrade Lavalink ke v4.2+."
+                );
+            }
+
+            throw new Error(
+                "LAVALINK_VOICE_NOT_CONNECTED: Bot belum tersambung ke voice channel. " +
+                "Periksa permission Connect/Speak dan pastikan bot benar-benar join channel."
+            );
+        }
+
+        return player;
+    }
+
     async play(guildId, voiceChannel, track) {
         let manager = lavalinkService.getManager();
 
@@ -35,29 +152,7 @@ class LavalinkDriver {
             throw new Error("Lavalink server is still starting up or connection failed. Please wait a minute and try again.");
         }
 
-        let player = manager.players.get(guildId);
-        if (!player) {
-            player = await manager.createPlayer({
-                guildId: guildId,
-                voiceChannelId: voiceChannel.id,
-                textChannelId: null, // Can be set later
-                selfDeaf: true,
-                selfMute: false,
-                volume: 100
-            });
-        }
-
-        if (!player.connected) {
-            player.options.voiceChannelId = voiceChannel.id;
-            await player.connect();
-            // Wait for connection to be confirmed by stats or state
-            for (let i = 0; i < 10 && !player.connected; i++) {
-                await new Promise(r => setTimeout(r, 200));
-            }
-        } else if (player.voiceChannelId !== voiceChannel.id) {
-            await player.changeVoiceState({ voiceChannelId: voiceChannel.id });
-            await new Promise(r => setTimeout(r, 500));
-        }
+        const player = await this.ensureVoiceReady(manager, guildId, voiceChannel);
 
         // If switching engines, make sure we stop anything currently 'playing' in Lavalink's mind
         if (player.playing) {
@@ -65,10 +160,48 @@ class LavalinkDriver {
             await new Promise(r => setTimeout(r, 200));
         }
 
-        const query = track.url || track.title;
+        if (track?.source === "myinstants") {
+            try {
+                await primeMyInstantsTrack(track);
+            } catch (error) {
+                logger.warn("MyInstants local audio cache prime failed; falling back to remote URL.", {
+                    title: track?.title || null,
+                    url: track?.originalUrl || track?.url || null,
+                    message: error?.message || String(error),
+                });
+            }
+        }
+
+        const cachedPlaybackUrl = getPlaybackUrlForTrack(track);
+        const query = cachedPlaybackUrl || track.url || track.title;
+        const originalQuery = track.originalUrl || track.originUrl || track.url || track.title;
+
+        if (track?.youtubeVideoId && !cachedPlaybackUrl) {
+            primeYoutubeTrack(track)?.catch((error) => {
+                logger.debug("Background audio cache prime failed.", {
+                    videoId: track.youtubeVideoId,
+                    message: error?.message || String(error),
+                });
+            });
+        }
         logger.debug(`Lavalink Search Query: "${query}"`);
 
-        const searchResult = await player.search({ query });
+        let searchResult = await player.search({ query });
+
+        if (
+            query !== originalQuery &&
+            (!searchResult.tracks || searchResult.tracks.length === 0)
+        ) {
+            logger.warn(
+                `Cached playback URL failed for guild ${guildId}; falling back to source URL.`,
+                {
+                    query,
+                    originalQuery,
+                    videoId: track?.youtubeVideoId || null,
+                }
+            );
+            searchResult = await player.search({ query: originalQuery });
+        }
 
         logger.debug(`Lavalink Search Result: loadType=${searchResult.loadType}, tracks=${searchResult.tracks?.length}`);
 
@@ -93,16 +226,34 @@ class LavalinkDriver {
         // Play now (replaces current track)
         logger.info(`Lavalink starting playback in guild ${guildId}: ${lavalinkTrack.info.title}`);
 
+        if (!this.isPlayerVoiceReady(player, voiceChannel.id)) {
+            throw new Error(
+                "LAVALINK_VOICE_NOT_READY: Voice session Lavalink belum siap untuk mulai playback."
+            );
+        }
+
         await player.play({
             clientTrack: lavalinkTrack,
             noReplace: false
         });
+
+        // Guard against silent-play false positive: track started event can happen while voice is disconnected.
+        const stillConnected = await this.waitForConnected(player, 1500);
+        const sessionId = stillConnected ? await this.waitForSessionId(player, 1500) : null;
+        if (!stillConnected || !sessionId || player.voiceChannelId !== voiceChannel.id) {
+            await this.stop(guildId).catch(() => { });
+            throw new Error(
+                "LAVALINK_VOICE_DISCONNECTED_DURING_PLAY: Playback dimulai saat voice disconnected."
+            );
+        }
 
         // Ensure volume is set and player is not paused
         await player.setVolume(100);
         if (player.paused) {
             await player.resume();
         }
+
+        lavalinkService.clearLastVoiceClose(guildId);
 
         return track;
     }
@@ -194,7 +345,11 @@ class LavalinkDriver {
                 requestedById: t.userData?.requesterId
             })),
             player: {
-                state: { status }
+                state: {
+                    status,
+                    playing: Boolean(player.playing),
+                    paused: Boolean(player.paused),
+                }
             },
             repeatMode: player.repeatMode === "track" ? "track" : (player.repeatMode === "queue" ? "all" : "off"),
             engine: "lavalink"

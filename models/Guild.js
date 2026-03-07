@@ -12,8 +12,8 @@ const Guild = sequelize.define("Guild", {
         allowNull: true,
     },
     audio_engine: {
-        type: DataTypes.ENUM("ffmpeg", "lavalink"),
-        defaultValue: "ffmpeg",
+        type: DataTypes.ENUM("lavalink"),
+        defaultValue: "lavalink",
         allowNull: false,
     }
 }, {

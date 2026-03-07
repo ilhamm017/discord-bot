@@ -1,6 +1,8 @@
+const path = require("path");
+
 let config = {};
 try {
-  config = require("../config.json");
+  config = require(path.join(__dirname, "../../config.json"));
 } catch (error) {
   config = {};
 }

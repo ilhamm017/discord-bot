@@ -22,7 +22,7 @@ at 'contents[2].parts[0].function_response': Proto field is not repeating, canno
 3. **Gemma hanya menerima role user/model**, jadi setiap jejak function call/response harus diubah menjadi teks biasa.
 
 ### Fix yang Sudah Diterapkan
-- Di `functions/ai/completion.js`, saat model Gemma:
+- Di `ai/completion.js`, saat model Gemma:
   - `functionCall` / `functionResponse` diubah menjadi teks JSON / deskripsi tool hasil.
   - `systemInstruction` + daftar tools di-inject ke prompt pertama (manual tool calling).
   - Role `function` di-convert ke `user`.

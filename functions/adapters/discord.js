@@ -1,5 +1,5 @@
 const logger = require("../../utils/logger");
-const { runAiAgent } = require("../ai/controller");
+const { runAiAgent } = require("../../ai/controller");
 const {
     buildServerContext,
     buildMemorySummary,
@@ -7,6 +7,7 @@ const {
     sanitizeMessage,
     replaceGenericCall
 } = require("../../utils/ai/ai_chat");
+const { maybeHandleVoiceReply } = require("../../utils/common/ai_voice");
 const { waitWithTyping } = require("../../utils/common/typing");
 const {
     buildMemberListComponents,
@@ -109,6 +110,19 @@ async function handleDiscordMessage(message, prompt, options = {}) {
 
             // Use waitWithTyping to simulate natural delay based on length
             await waitWithTyping(message.channel, replyPayload.content);
+
+            const voiceReply = await maybeHandleVoiceReply(
+                message,
+                replyPayload.content,
+                response
+            ).catch((error) => {
+                logger.warn("AI voice reply attempt failed.", error);
+                return { handled: false, skipTextReply: false };
+            });
+
+            if (voiceReply?.skipTextReply) {
+                return;
+            }
 
             let sent;
             try {

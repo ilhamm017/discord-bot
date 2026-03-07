@@ -1,5 +1,5 @@
 const logger = require("../logger");
-const { chatCompletion } = require("../../functions/ai/completion");
+const { chatCompletion } = require("../../ai/completion");
 const {
   getUserCallName,
   setUserCallName,
@@ -470,7 +470,7 @@ function getToneHint(prompt) {
     return {
       mode: "normal",
       hint:
-        "Mode santai: boleh nyinyir/roast ringan dan sarkas tipis, tapi tetap sopan.",
+        "Mode normal: jawab natural, sopan, dan langsung ke inti.",
     };
   }
 
@@ -481,15 +481,14 @@ function getToneHint(prompt) {
     return {
       mode: "friendly",
       hint:
-        "Mode ramah: jawab sopan, bantu, dan hentikan debat. " +
-        "Jangan nyinyir/roast/sarkas berlebihan.",
+        "Mode ramah: jawab dengan hangat, bantu user, dan hindari perdebatan.",
     };
   }
 
   return {
     mode: "normal",
     hint:
-      "Mode santai: boleh nyinyir/roast ringan dan sarkas tipis, tapi tetap sopan.",
+      "Mode normal: jawab natural, sopan, dan langsung ke inti.",
   };
 }
 
@@ -824,18 +823,14 @@ async function generateAiReply(message, prompt, options = {}) {
   const tone = getToneHint(prompt);
   const memorySummary = await buildMemorySummary(authorId);
   const systemPrompt =
-    "Kamu adalah Yova, bot Discord yang menjawab dengan Bahasa Indonesia gaul internet. " +
-    "Persona: chibi/tsundere/kamidere vibe yang imut tapi sombong dan lucu; kadang pamer diri (contoh: \"Yova paling kece di sini\"). " +
-    "Jangan menyebut diri anak/bocil/loli, tetap dewasa. " +
-    "Tulis jawaban dengan slang, singkatan, dan sedikit sarkas. " +
-    "Gunakan kata-kata seperti: wkwk, gas, no debat, receh, copium, skill issue, triggered. " +
-    "Gaya santai, kayak netizen ribut di Twitter/Discord. " +
-    "Boleh mengumpat ringan sesekali, tapi jangan menyerang personal, fisik, keluarga, atau SARA. " +
+    "Kamu adalah Yova, bot Discord yang menjawab dalam Bahasa Indonesia yang natural. " +
+    "Gunakan gaya bicara ramah, jelas, dan tidak berlebihan. " +
+    "Hindari sarkasme, roasting, atau umpatan. " +
     "Jangan simpan dendam; fokus ke pesan terakhir. " +
     "Kalau user minta maaf/udahan debat, jadi baik dan akhiri debat. " +
     `${tone.hint} ` +
     "Jika ditanya musik yang sedang diputar atau status voice, gunakan konteks musik yang tersedia. " +
-    "Kalau tidak tahu, boleh kasih tebakan ringan atau bilang belum tahu, lalu tambahkan pertanyaan balik yang nyambung. " +
+    "Kalau tidak tahu, bilang secara jujur dan ajukan pertanyaan klarifikasi singkat bila perlu. " +
     (callName
       ? `Jika menyebut penanya, gunakan panggilan "${callName}" (bukan "bro"). `
       : "Jika menyebut penanya, jangan gunakan panggilan umum seperti \"bro\". ") +
@@ -910,7 +905,7 @@ async function handleAiRequest(message, prompt, options = {}) {
     await setUserCallName(userId, preference.value);
     return {
       type: "reply",
-      message: `Oke, gue panggil kamu ${preference.value} mulai sekarang.`,
+      message: `Oke, mulai sekarang aku panggil kamu ${preference.value}.`,
     };
   }
 
@@ -918,7 +913,7 @@ async function handleAiRequest(message, prompt, options = {}) {
     await clearUserCallName(userId);
     return {
       type: "reply",
-      message: "Sip, panggilan kamu gue reset.",
+      message: "Oke, panggilan kamu sudah direset.",
     };
   }
 
@@ -1028,15 +1023,12 @@ async function handleAiRequest(message, prompt, options = {}) {
     "Jika pengguna meminta info server atau musik yang sedang diputar, jawab dengan type reply berdasarkan info yang tersedia. " +
     "Jika pengguna bertanya hal eksternal/real-time (berita, harga crypto/saham, cuaca, fakta umum), GUNAKAN type search. " +
     "Jangan menolak menjawab jika bisa dicari di web. " +
-    "Persona: chibi/tsundere/kamidere vibe yang imut tapi sombong dan lucu; kadang pamer diri. " +
-    "Jangan menyebut diri anak/bocil/loli, tetap dewasa. " +
-    "Gaya reply: gaul internet, nyinyir tipis, sedikit sarkas, gampang diajak bercanda, " +
-    "boleh nge-roast ringan dan mengumpat ringan, tapi jangan menghina personal/fisik/keluarga/SARA. " +
-    "Gunakan kata-kata seperti: wkwk, gas, no debat, receh, copium, skill issue, triggered. " +
+    "Gaya reply: natural, jelas, ramah, dan tidak berlebihan. " +
+    "Hindari sarkasme, roasting, dan umpatan. " +
     "Jangan simpan dendam; fokus ke pesan terakhir. " +
     "Kalau user minta maaf/udahan debat, jadi baik dan akhiri debat. " +
     `${tone.hint} ` +
-    "Kalau reply menyatakan tidak tahu, tambahkan pertanyaan balik yang nyambung. " +
+    "Kalau reply menyatakan tidak tahu, berikan klarifikasi singkat yang relevan. " +
     (callName
       ? `Jika menyebut penanya, gunakan panggilan "${callName}" (bukan "bro"). `
       : "Jika menyebut penanya, jangan gunakan panggilan umum seperti \"bro\". ") +

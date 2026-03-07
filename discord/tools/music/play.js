@@ -5,14 +5,16 @@ const {
   stripTargetTokens,
 } = require("./play/utils");
 const { handleFavorites } = require("./play/favorites");
+const { handleMyInstants } = require("./play/myinstants");
 const { handleSpotify } = require("./play/spotify");
 const { handleYoutube } = require("./play/youtube");
+const { detectMyInstantsRequest } = require("../../../utils/common/myinstants");
 
 const MENTION_TEST_REGEX = /<@!?\d+>/;
 
 module.exports = {
   name: "play",
-  description: "Putar audio dari YouTube.",
+  description: "Putar audio dari YouTube atau sound effect MyInstants.",
   async execute(message, args) {
     if (!message.guild) {
       return message.reply("Perintah ini hanya bisa dipakai di server.");
@@ -38,14 +40,25 @@ module.exports = {
       return handleFavorites(message, voiceChannel);
     }
 
-    // 2. Spotify
+    // 2. MyInstants
+    const myInstantsRequest = detectMyInstantsRequest(query);
+    if (myInstantsRequest.shouldUseMyInstants) {
+      return handleMyInstants(message, voiceChannel, query, {
+        forceTopResult: hasMention,
+      });
+    }
+
+    // 3. Spotify
     const spotifyRef = parseSpotifyInput(query);
     if (spotifyRef) {
       return handleSpotify(message, voiceChannel, spotifyRef, query);
     }
 
-    // 3. YouTube (Video, Playlist, Search)
+    // 4. YouTube (Video, Playlist, Search)
     const validation = play.yt_validate(query);
-    return handleYoutube(message, voiceChannel, query, validation);
+    return handleYoutube(message, voiceChannel, query, validation, {
+      forceTopYoutube: hasMention,
+      targetMember: target.targetMember || null,
+    });
   },
 };

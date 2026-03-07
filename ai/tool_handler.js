@@ -1,5 +1,5 @@
-const platform = require("../platform");
-const logger = require("../../utils/logger");
+const platform = require("../functions/platform");
+const logger = require("../utils/logger");
 
 function parseToolArguments(raw, name) {
     if (raw === undefined || raw === null) {
@@ -94,6 +94,38 @@ async function callTool(name, args, context = {}) {
         if (!args.content) {
             for (const syn of contentSynonyms) {
                 if (args[syn]) { args.content = args[syn]; break; }
+            }
+        }
+
+        if (name === "playMusic") {
+            if (!args.query) {
+                const playQuerySynonyms = ["sound_effect", "soundEffect", "song", "title", "track", "audio"];
+                for (const syn of playQuerySynonyms) {
+                    if (args[syn]) {
+                        args.query = args[syn];
+                        break;
+                    }
+                }
+            }
+
+            if (!args.targetUserId) {
+                const playTargetSynonyms = ["target_user", "targetUser", "recipient", "to", "member"];
+                for (const syn of playTargetSynonyms) {
+                    if (args[syn]) {
+                        args.targetUserId = args[syn];
+                        break;
+                    }
+                }
+            }
+
+            if (!args.source) {
+                const loweredQuery = String(args.query || "").toLowerCase();
+                if (
+                    args.sound_effect ||
+                    /\b(sound\s*effects?|soundboard|sfx|efek\s+suara|myinstants?)\b/i.test(loweredQuery)
+                ) {
+                    args.source = "myinstants";
+                }
             }
         }
 
@@ -201,7 +233,7 @@ async function callTool(name, args, context = {}) {
                 result = rateLimiter.getStats();
                 break;
             }
-            case 'playMusic': result = await platform.playMusic(context.guildId, context.userId, context.channelId, args.query, args.targetUserId); break;
+            case 'playMusic': result = await platform.playMusic(context.guildId, context.userId, context.channelId, args.query, args.targetUserId, args.source); break;
             case 'controlMusic': {
                 if (args.action === 'stop') result = await platform.stopMusic(context.guildId);
                 else if (args.action === 'skip') result = await platform.skipMusic(context.guildId);

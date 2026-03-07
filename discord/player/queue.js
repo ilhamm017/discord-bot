@@ -23,38 +23,38 @@ const {
 // Wrapper for getState to match external interface
 function getState(guildId) {
   let state = getGuildState(guildId);
+  const lavalinkState = lavalinkDriver.getState(guildId);
 
   if (state) {
-    // Determine engine if not set (helps during initial start or reload)
     if (!state.engine) {
-      const lavalinkPlayer = lavalinkDriver.getPlayer(guildId);
-      if (lavalinkPlayer) state.engine = 'lavalink';
-      else state.engine = 'ffmpeg';
+      state.engine = "lavalink";
     }
 
-    if (state.engine === 'lavalink') {
-      const lavalinkState = lavalinkDriver.getState(guildId);
-      if (lavalinkState && lavalinkState.player && lavalinkState.player.state) {
-        // Return augmented state with real Lavalink player status
-        return {
-          ...state,
-          player: {
-            ...state.player,
-            state: {
-              ...(state.player?.state || {}),
-              status: lavalinkState.player.state.status,
-              playing: lavalinkState.player.state.playing,
-              paused: lavalinkState.player.state.paused,
-            }
+    // Lavalink-only mode: always use live player flags when available.
+    if (lavalinkState && lavalinkState.player && lavalinkState.player.state) {
+      return {
+        ...state,
+        engine: "lavalink",
+        diagnostics: state.diagnostics || null,
+        player: {
+          ...state.player,
+          state: {
+            ...(state.player?.state || {}),
+            status: lavalinkState.player.state.status,
+            playing: lavalinkState.player.state.playing,
+            paused: lavalinkState.player.state.paused,
           }
-        };
-      }
+        }
+      };
     }
-    return state;
+    return {
+      ...state,
+      diagnostics: state.diagnostics || null,
+    };
   }
 
-  // Fallback if no local state (should be rare with Unified Queue)
-  return lavalinkDriver.getState(guildId);
+  // Fallback if no local state (should be rare with Unified Queue).
+  return lavalinkState;
 }
 
 // Wrapper for leaveVoice to match external interface

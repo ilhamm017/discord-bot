@@ -23,7 +23,7 @@ module.exports = {
 
     if (/^(reset|hapus|lupa|clear)$/i.test(payload.trim())) {
       await clearUserCallName(message.author.id);
-      return message.reply("Oke, panggilan kamu gue hapus.");
+      return message.reply("Oke, panggilan kamu sudah dihapus.");
     }
 
     const callName = sanitizeCallName(payload);
@@ -32,6 +32,6 @@ module.exports = {
     }
 
     await setUserCallName(message.author.id, callName);
-    return message.reply(`Sip, gue panggil kamu ${callName}.`);
+    return message.reply(`Oke, mulai sekarang aku panggil kamu ${callName}.`);
   },
 };

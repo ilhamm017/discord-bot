@@ -16,7 +16,7 @@ const QueueState = sequelize.define("QueueState", {
     },
     engine: {
         type: DataTypes.STRING,
-        defaultValue: "ffmpeg",
+        defaultValue: "lavalink",
     },
 });
 

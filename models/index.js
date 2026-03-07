@@ -19,6 +19,8 @@ const SpotifyCache = require("./SpotifyCache");
 const User = require("./User");
 const UserMemory = require("./UserMemory");
 const UserQueueHistory = require("./UserQueueHistory");
+const GuildPlaybackHistory = require("./GuildPlaybackHistory");
+const ElevenLabsUsage = require("./ElevenLabsUsage");
 
 // Associations
 Guild.hasMany(Channel, { foreignKey: "guild_id" });
@@ -58,4 +60,6 @@ module.exports = {
     User,
     UserMemory,
     UserQueueHistory,
+    GuildPlaybackHistory,
+    ElevenLabsUsage,
 };

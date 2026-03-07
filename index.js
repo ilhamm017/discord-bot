@@ -1,26 +1,21 @@
 const { connectDB } = require("./storage/sequelize");
 const discord = require("./discord");
 const logger = require("./utils/logger");
-const ffmpeg = require("ffmpeg-static");
 const play = require("play-dl");
 const path = require("path");
 const fs = require("fs");
-
-// Configure FFmpeg
-if (ffmpeg) {
-  const ffmpegDir = path.dirname(ffmpeg);
-  if (!process.env.PATH.includes(ffmpegDir)) {
-    process.env.PATH = `${ffmpegDir}${path.delimiter}${process.env.PATH}`;
-  }
-  logger.info(`FFmpeg configured from: ${ffmpeg}`);
-} else {
-  logger.warn("ffmpeg-static returned null, music playback might fail.");
-}
+const {
+  startMediaCacheServer,
+  stopMediaCacheServer,
+} = require("./utils/common/media_cache_server");
 
 async function main() {
   try {
     // 1. Initialize Core Services (DB, etc.)
     await connectDB();
+    const { hydratePlaybackHistories } = require("./discord/player/voice");
+    const hydratedHistories = await hydratePlaybackHistories();
+    logger.info(`Hydrated ${hydratedHistories} guild playback histories from database.`);
 
     // 2. Start Lavalink (Infrastructure for premium audio)
     const { spawn, execSync } = require("child_process");
@@ -36,6 +31,7 @@ async function main() {
     } catch (e) { }
 
     logger.info("Starting Lavalink server...");
+    startMediaCacheServer();
     const logPath = path.join(__dirname, "lavalink", "lavalink_server.log");
     const out = fs.openSync(logPath, "a");
     const lavalinkProcess = spawn(jrePath, ["-jar", lavalinkPath], {
@@ -48,6 +44,7 @@ async function main() {
 
     const cleanup = () => {
       logger.info("Shutting down... Cleaning up processes.");
+      stopMediaCacheServer();
       if (lavalinkProcess) {
         lavalinkProcess.kill("SIGTERM");
       }

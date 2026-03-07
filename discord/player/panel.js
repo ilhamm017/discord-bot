@@ -8,7 +8,7 @@ const {
 } = require("discord.js");
 const logger = require("../../utils/logger");
 
-const QUEUE_PAGE_SIZE = 25;
+const PAGE_SIZE = 25;
 
 function formatDuration(totalSeconds) {
   const seconds = Number(totalSeconds);
@@ -19,10 +19,7 @@ function formatDuration(totalSeconds) {
   const secs = Math.floor(seconds % 60);
 
   if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(
-      2,
-      "0"
-    )}`;
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   }
 
   return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
@@ -70,6 +67,16 @@ function getRepeatLabel(mode) {
   }
 }
 
+function truncateText(value, maxLength) {
+  const text = String(value || "");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function getCurrentTrack(state) {
   if (!state || !Array.isArray(state.queue)) return null;
   if (state.currentIndex < 0 || state.currentIndex >= state.queue.length) {
@@ -84,35 +91,47 @@ function getThumbnailUrl(track) {
   return thumbs[thumbs.length - 1]?.url || null;
 }
 
-function truncateText(value, maxLength) {
-  const text = String(value || "");
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+function getPanelView(state) {
+  return state?.panelView === "history" ? "history" : "queue";
 }
 
-function clampNumber(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+function getRequesterLabel(track) {
+  return track?.requestedById
+    ? `<@${track.requestedById}>`
+    : track?.requestedByTag || track?.requestedBy || "-";
+}
+
+function getListPagination(totalItems, page) {
+  if (totalItems <= 0) {
+    return { page: 0, totalPages: 0, startIndex: 0 };
+  }
+
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const safePage = clampNumber(
+    Number.isInteger(page) ? page : 0,
+    0,
+    totalPages - 1
+  );
+  return {
+    page: safePage,
+    totalPages,
+    startIndex: safePage * PAGE_SIZE,
+  };
 }
 
 function getQueuePagination(queue, currentIndex, page) {
   const startBase = Math.max(0, currentIndex + 1);
   const totalUpcoming = Math.max(0, queue.length - startBase);
   if (totalUpcoming <= 0) {
-    return {
-      page: 0,
-      totalPages: 0,
-      startIndex: startBase,
-    };
+    return { page: 0, totalPages: 0, startIndex: startBase };
   }
 
-  const totalPages = Math.max(1, Math.ceil(totalUpcoming / QUEUE_PAGE_SIZE));
-  const safePage = clampNumber(
-    Number.isInteger(page) ? page : 0,
-    0,
-    totalPages - 1
-  );
-  const startIndex = startBase + safePage * QUEUE_PAGE_SIZE;
-  return { page: safePage, totalPages, startIndex };
+  const pagination = getListPagination(totalUpcoming, page);
+  return {
+    page: pagination.page,
+    totalPages: pagination.totalPages,
+    startIndex: startBase + pagination.startIndex,
+  };
 }
 
 function buildQueueLines(queue, startIndex, maxItems, currentIndex) {
@@ -130,12 +149,35 @@ function buildQueueLines(queue, startIndex, maxItems, currentIndex) {
   }
 
   if (start > 0) {
-    const prevCount = start;
-    lines.unshift(`... ${prevCount} lagu sebelum`);
+    lines.unshift(`... ${start} lagu sebelum`);
   }
 
   if (start + maxItems < total) {
     lines.push(`... ${total - (start + maxItems)} lagu lagi`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildHistoryLines(history, startIndex, maxItems) {
+  if (!Array.isArray(history) || history.length === 0) return "-";
+
+  const lines = [];
+  const total = history.length;
+  const start = Math.max(0, startIndex);
+
+  for (let i = start; i < total && lines.length < maxItems; i += 1) {
+    const track = history[i];
+    const title = truncateText(track?.title || track?.url || "-", 60);
+    lines.push(`${i + 1}. ${title}`);
+  }
+
+  if (start > 0) {
+    lines.unshift(`... ${start} lagu history sebelum`);
+  }
+
+  if (start + maxItems < total) {
+    lines.push(`... ${total - (start + maxItems)} lagu history lagi`);
   }
 
   return lines.join("\n");
@@ -151,10 +193,7 @@ function buildQueueSelect(queue, currentIndex, page) {
     return { menu: null, pagination };
   }
 
-  const slice = queue.slice(
-    pagination.startIndex,
-    pagination.startIndex + QUEUE_PAGE_SIZE
-  );
+  const slice = queue.slice(pagination.startIndex, pagination.startIndex + PAGE_SIZE);
   if (slice.length === 0) {
     return { menu: null, pagination };
   }
@@ -162,16 +201,11 @@ function buildQueueSelect(queue, currentIndex, page) {
   const options = slice.map((track, offset) => {
     const index = pagination.startIndex + offset;
     const title = truncateText(track?.title || track?.url || "-", 90);
-    const label = `${index + 1}. ${title}`;
     return {
-      label: truncateText(label, 100),
+      label: truncateText(`${index + 1}. ${title}`, 100),
       value: String(index),
     };
   });
-
-  if (options.length === 0) {
-    return { menu: null, pagination };
-  }
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId("music_select")
@@ -181,35 +215,85 @@ function buildQueueSelect(queue, currentIndex, page) {
   return { menu, pagination };
 }
 
+function buildHistorySelect(history, page) {
+  if (!Array.isArray(history) || history.length === 0) {
+    return { menu: null, pagination: { page: 0, totalPages: 0, startIndex: 0 } };
+  }
+
+  const pagination = getListPagination(history.length, page);
+  const slice = history.slice(pagination.startIndex, pagination.startIndex + PAGE_SIZE);
+  if (slice.length === 0) {
+    return { menu: null, pagination };
+  }
+
+  const options = slice.map((track, offset) => {
+    const index = pagination.startIndex + offset;
+    const title = truncateText(track?.title || track?.url || "-", 80);
+    const requester = truncateText(getRequesterLabel(track), 45);
+    return {
+      label: truncateText(`${index + 1}. ${title}`, 100),
+      description: truncateText(`Replay • ${requester}`, 100),
+      value: String(index),
+    };
+  });
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId("music_history_select")
+    .setPlaceholder("Pilih lagu dari history")
+    .addOptions(options);
+
+  return { menu, pagination };
+}
+
 function buildControlPanel(state) {
   const queue = Array.isArray(state?.queue) ? state.queue : [];
+  const history = Array.isArray(state?.playHistory) ? state.playHistory : [];
   const queueLength = queue.length;
-  const currentIndex =
-    typeof state?.currentIndex === "number" ? state.currentIndex : -1;
+  const currentIndex = typeof state?.currentIndex === "number" ? state.currentIndex : -1;
   const currentTrack = getCurrentTrack(state);
-  const status = state?.player?.state?.status || AudioPlayerStatus.Idle;
+  const pausedFlag = state?.player?.state?.paused === true;
+  const playingFlag = state?.player?.state?.playing === true;
+  const status = pausedFlag
+    ? AudioPlayerStatus.Paused
+    : playingFlag
+      ? AudioPlayerStatus.Playing
+      : state?.player?.state?.status || AudioPlayerStatus.Idle;
 
   const upcoming = currentTrack
     ? Math.max(0, queueLength - currentIndex - 1)
     : queueLength;
+  const repeatMode = state?.repeatMode || "off";
+  const panelView = getPanelView(state);
+  const queuePage = typeof state?.queuePage === "number" ? state.queuePage : 0;
+  const historyPage = typeof state?.historyPage === "number" ? state.historyPage : 0;
+  const queueResult = buildQueueSelect(queue, currentIndex, queuePage);
+  const historyResult = buildHistorySelect(history, historyPage);
+  const queuePagination = queueResult.pagination;
+  const historyPagination = historyResult.pagination;
+  const activeResult = panelView === "history" ? historyResult : queueResult;
+  const activePagination = panelView === "history" ? historyPagination : queuePagination;
+  const activeListLabel = panelView === "history" ? "History" : "Queue";
+  const activeListValue = panelView === "history"
+    ? buildHistoryLines(history, activePagination.startIndex, 10)
+    : buildQueueLines(
+        queue,
+        queuePagination.totalPages > 0
+          ? queuePagination.startIndex
+          : Math.max(0, currentIndex),
+        10,
+        currentIndex
+      );
+
+  if (state) {
+    state.queuePage = queuePagination.page;
+    state.historyPage = historyPagination.page;
+    state.panelView = panelView;
+  }
 
   const title = currentTrack?.title || "Tidak ada lagu yang diputar.";
   const durationSeconds = currentTrack?.info?.video_details?.durationInSec;
-  const requester = currentTrack?.requestedById
-    ? `<@${currentTrack.requestedById}>`
-    : currentTrack?.requestedByTag || currentTrack?.requestedBy || "-";
+  const requester = getRequesterLabel(currentTrack);
   const statusLabel = getStatusLabel(status);
-  const repeatMode = state?.repeatMode || "off";
-  const queuePage = typeof state?.queuePage === "number" ? state.queuePage : 0;
-  const queueResult = buildQueueSelect(queue, currentIndex, queuePage);
-  const pagination = queueResult?.pagination || {
-    page: 0,
-    totalPages: 0,
-    startIndex: Math.max(0, currentIndex),
-  };
-  if (state) {
-    state.queuePage = pagination.page;
-  }
 
   const embed = new EmbedBuilder()
     .setTitle("Now Playing")
@@ -221,26 +305,17 @@ function buildControlPanel(state) {
       { name: "Status", value: statusLabel, inline: true },
       { name: "Requester", value: requester, inline: true },
       { name: "Repeat", value: getRepeatLabel(repeatMode), inline: true },
-      {
-        name: "Queue List",
-        value: buildQueueLines(
-          queue,
-          pagination.totalPages > 0
-            ? pagination.startIndex
-            : Math.max(0, currentIndex),
-          10,
-          currentIndex
-        ),
-      }
+      { name: "History", value: String(history.length), inline: true },
+      { name: `${activeListLabel} List`, value: activeListValue }
     );
 
   if (currentTrack?.url) {
     embed.setURL(currentTrack.url);
   }
 
-  if (pagination.totalPages > 1) {
+  if (activePagination.totalPages > 1) {
     embed.setFooter({
-      text: `Queue Page ${pagination.page + 1}/${pagination.totalPages}`,
+      text: `${activeListLabel} Page ${activePagination.page + 1}/${activePagination.totalPages}`,
     });
   }
 
@@ -250,13 +325,17 @@ function buildControlPanel(state) {
   }
 
   const isPaused =
+    pausedFlag ||
     status === AudioPlayerStatus.Paused ||
     status === AudioPlayerStatus.AutoPaused;
+  const isIdle = !playingFlag && !isPaused;
   const hasState = Boolean(state);
   const hasCurrent = Boolean(currentTrack);
-
   const canPrev = hasState && hasCurrent && currentIndex > 0;
-  const canNext = hasState && hasCurrent && currentIndex < queueLength - 1;
+  const canNext =
+    hasState &&
+    hasCurrent &&
+    (currentIndex < queueLength - 1 || (repeatMode === "all" && queueLength > 0));
   const canPause = hasState && hasCurrent;
   const canStop = hasState && queueLength > 0;
   const canLeave = hasState;
@@ -265,6 +344,7 @@ function buildControlPanel(state) {
   const canLoop = hasState && queueLength > 0;
   const isLoopTrack = repeatMode === "track";
   const isLoopAll = repeatMode === "all";
+  const canToggleHistory = history.length > 0;
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -274,8 +354,8 @@ function buildControlPanel(state) {
       .setDisabled(!canPrev),
     new ButtonBuilder()
       .setCustomId("music_pause")
-      .setLabel(isPaused ? "Resume" : "Pause")
-      .setStyle(isPaused ? ButtonStyle.Success : ButtonStyle.Secondary)
+      .setLabel(isPaused || isIdle ? "Play" : "Pause")
+      .setStyle(isPaused || isIdle ? ButtonStyle.Success : ButtonStyle.Secondary)
       .setDisabled(!canPause),
     new ButtonBuilder()
       .setCustomId("music_next")
@@ -318,43 +398,72 @@ function buildControlPanel(state) {
       .setStyle(isLoopAll ? ButtonStyle.Success : ButtonStyle.Secondary)
       .setDisabled(!canLoop),
     new ButtonBuilder()
-      .setCustomId("music_switch_engine")
-      .setLabel(state?.engine === "lavalink" ? "Use FFmpeg" : "Use Lavalink")
-      .setStyle(ButtonStyle.Secondary)
+      .setCustomId("music_history_toggle")
+      .setLabel(panelView === "history" ? "Lihat Queue" : "Lihat History")
+      .setStyle(panelView === "history" ? ButtonStyle.Success : ButtonStyle.Secondary)
+      .setDisabled(!canToggleHistory)
   );
 
   const components = [row1, row2, row3];
-  if (pagination.totalPages > 1) {
-    const queueNav = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("music_queue_prev")
-        .setLabel("Queue Prev")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(pagination.page <= 0),
-      new ButtonBuilder()
-        .setCustomId("music_queue_next")
-        .setLabel("Queue Next")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(pagination.page >= pagination.totalPages - 1)
+
+  if (activePagination.totalPages > 1) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("music_panel_prev")
+          .setLabel(`${activeListLabel} Prev`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(activePagination.page <= 0),
+        new ButtonBuilder()
+          .setCustomId("music_panel_next")
+          .setLabel(`${activeListLabel} Next`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(activePagination.page >= activePagination.totalPages - 1)
+      )
     );
-    components.push(queueNav);
   }
 
-  if (queueResult?.menu) {
-    components.push(new ActionRowBuilder().addComponents(queueResult.menu));
+  if (activeResult?.menu) {
+    components.push(new ActionRowBuilder().addComponents(activeResult.menu));
   }
 
   return { embeds: [embed], components };
 }
 
 async function updateControlPanel(client, state) {
-  if (!client || !state?.panelChannelId) return null;
-  if (state.panelUpdatePromise) return state.panelUpdatePromise;
+  if (!client || !state) return null;
+
+  let baseState = state;
+  if (state.guildId) {
+    const { getGuildState } = require("./voice");
+    const canonical = getGuildState(state.guildId);
+    if (canonical) {
+      baseState = canonical;
+      if (state.panelChannelId && !baseState.panelChannelId) {
+        baseState.panelChannelId = state.panelChannelId;
+      }
+      if (state.panelMessageId && !baseState.panelMessageId) {
+        baseState.panelMessageId = state.panelMessageId;
+      }
+      if (typeof state.queuePage === "number") {
+        baseState.queuePage = state.queuePage;
+      }
+      if (typeof state.historyPage === "number") {
+        baseState.historyPage = state.historyPage;
+      }
+      if (state.panelView) {
+        baseState.panelView = state.panelView;
+      }
+    }
+  }
+
+  if (!baseState?.panelChannelId) return null;
+  if (baseState.panelUpdatePromise) return baseState.panelUpdatePromise;
 
   const updatePromise = (async () => {
     let channel;
     try {
-      channel = await client.channels.fetch(state.panelChannelId);
+      channel = await client.channels.fetch(baseState.panelChannelId);
     } catch (error) {
       logger.warn("Failed fetching panel channel.", error);
       return null;
@@ -362,11 +471,35 @@ async function updateControlPanel(client, state) {
 
     if (!channel?.isTextBased?.()) return null;
 
-    const payload = buildControlPanel(state);
-
-    if (state.panelMessageId && channel.messages?.fetch) {
+    let renderState = baseState;
+    if (baseState.guildId) {
       try {
-        const message = await channel.messages.fetch(state.panelMessageId);
+        const { getState } = require("./queue");
+        renderState = getState(baseState.guildId) || baseState;
+      } catch (_) {
+        renderState = baseState;
+      }
+    }
+
+    if (renderState && renderState !== baseState) {
+      renderState.panelChannelId = baseState.panelChannelId;
+      renderState.panelMessageId = baseState.panelMessageId;
+      if (typeof baseState.queuePage === "number") {
+        renderState.queuePage = baseState.queuePage;
+      }
+      if (typeof baseState.historyPage === "number") {
+        renderState.historyPage = baseState.historyPage;
+      }
+      if (baseState.panelView) {
+        renderState.panelView = baseState.panelView;
+      }
+    }
+
+    const payload = buildControlPanel(renderState);
+
+    if (baseState.panelMessageId && channel.messages?.fetch) {
+      try {
+        const message = await channel.messages.fetch(baseState.panelMessageId);
         await message.edit(payload);
         return message;
       } catch (error) {
@@ -375,16 +508,16 @@ async function updateControlPanel(client, state) {
     }
 
     const sent = await channel.send(payload);
-    state.panelMessageId = sent.id;
+    baseState.panelMessageId = sent.id;
     return sent;
   })();
 
-  state.panelUpdatePromise = updatePromise;
+  baseState.panelUpdatePromise = updatePromise;
   try {
     return await updatePromise;
   } finally {
-    if (state.panelUpdatePromise === updatePromise) {
-      state.panelUpdatePromise = null;
+    if (baseState.panelUpdatePromise === updatePromise) {
+      baseState.panelUpdatePromise = null;
     }
   }
 }

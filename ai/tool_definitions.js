@@ -599,12 +599,17 @@ const tools = [
         type: "function",
         function: {
             name: "playMusic",
-            description: "Search and play music from YouTube. Use this when the user asks to play a song, audio, or music. You can target a specific user to play it where they are.",
+            description: "Search and play music or sound effects. Default to YouTube for songs, and use source='myinstants' when the user explicitly wants a MyInstants sound effect. You can target a specific user to play it where they are.",
             parameters: {
                 type: "object",
                 properties: {
-                    query: { type: "string", description: "The song title or URL to search and play." },
-                    targetUserId: { type: "string", description: "Optional: User ID to play the music for (at their location)." }
+                    query: { type: "string", description: "The song title, sound effect name, or URL to search and play." },
+                    targetUserId: { type: "string", description: "Optional: target user ID. Use their numeric Discord ID when the user says to play it for someone else." },
+                    source: {
+                        type: "string",
+                        enum: ["auto", "youtube", "myinstants"],
+                        description: "Optional preferred source. Use 'myinstants' for MyInstants sound effects, otherwise omit or use 'auto'."
+                    }
                 },
                 required: ["query"]
             },

@@ -23,7 +23,7 @@ module.exports = {
       return message.reply("Kamu harus berada di voice channel yang sama dengan bot.");
     }
 
-    if (state.currentIndex >= state.queue.length - 1) {
+    if (state.currentIndex >= state.queue.length - 1 && state.repeatMode !== "all") {
       return message.reply("Tidak ada lagu berikutnya di antrian.");
     }
 

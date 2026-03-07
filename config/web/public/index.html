@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yova Config Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="badge">YOVA CONFIG PANEL</p>
+      <h1>Atur <code>config.json</code> dan <code>lavalink/application.yml</code> dari browser</h1>
+      <p class="sub">
+        Ubah API key, cookies, dan parameter Lavalink tanpa edit file manual.
+        Simpan akan membuat backup otomatis.
+      </p>
+    </header>
+
+    <section class="panel">
+      <div class="toolbar">
+        <label class="token-wrap">
+          <span>Token (opsional)</span>
+          <input id="tokenInput" type="password" placeholder="x-config-token jika diaktifkan" />
+        </label>
+      </div>
+
+      <div id="tabBar" class="tab-bar" role="tablist" aria-label="Kategori konfigurasi"></div>
+
+      <section id="cookiePanel" class="cookie-panel" aria-labelledby="cookieTitle" data-tab="cookies">
+        <div class="cookie-copy">
+          <p class="badge cookie-badge">YOUTUBE COOKIES</p>
+          <h2 id="cookieTitle">Upload <code>cookies.txt</code></h2>
+          <p class="cookie-note">
+            File ini akan disimpan ke <code>.data/cookies.txt</code> dan langsung dipakai oleh
+            <code>yt-dlp</code> lewat <code>ytdlp_cookies_path</code>.
+          </p>
+        </div>
+
+        <div class="cookie-actions">
+          <label class="file-wrap">
+            <span>Pilih file export browser</span>
+            <input id="cookiesFileInput" type="file" accept=".txt,text/plain" />
+          </label>
+          <button id="uploadCookiesBtn" type="button">Upload cookies.txt</button>
+        </div>
+
+        <p id="cookiesStatus" class="status cookie-status" aria-live="polite"></p>
+      </section>
+
+      <section id="configBlock" class="section-block" aria-labelledby="configJsonTitle">
+        <div class="section-head">
+          <div>
+            <p class="badge">CONFIG.JSON</p>
+            <h2 id="configJsonTitle">Konfigurasi bot utama</h2>
+          </div>
+          <div class="actions">
+            <button id="reloadBtn" type="button">Reload</button>
+            <button id="saveBtn" type="button" class="primary">Simpan</button>
+          </div>
+        </div>
+
+        <p id="status" class="status" aria-live="polite"></p>
+        <form id="form" class="form"></form>
+      </section>
+
+      <section id="lavalinkBlock" class="section-block lavalink-block" aria-labelledby="lavalinkTitle" data-tab="lavalink">
+        <div class="section-head">
+          <div>
+            <p class="badge">LAVALINK</p>
+            <h2 id="lavalinkTitle">Konfigurasi node audio</h2>
+            <p class="section-note">
+              Section ini mengelola subset field penting dari <code>lavalink/application.yml</code>.
+            </p>
+          </div>
+          <div class="actions">
+            <button id="reloadLavalinkBtn" type="button">Reload Lavalink</button>
+            <button id="saveLavalinkBtn" type="button">Simpan YAML</button>
+            <button id="restartLavalinkBtn" type="button" class="primary">Restart Lavalink</button>
+          </div>
+        </div>
+
+        <p id="lavalinkStatus" class="status" aria-live="polite"></p>
+        <form id="lavalinkForm" class="form"></form>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

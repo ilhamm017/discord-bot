@@ -3,7 +3,7 @@
  * Manages TPM (Tokens Per Minute) limits for Google API
  */
 
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 const { estimateRequestTokens, calculatePriority } = require("./token_calculator");
 
 class TokenRateLimiter {

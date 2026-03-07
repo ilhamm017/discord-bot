@@ -1,5 +1,5 @@
 const readline = require("readline");
-const { chatCompletion } = require("./functions/ai/completion");
+const { chatCompletion } = require("./ai/completion");
 
 console.log("=== Simple CLI Test ===\n");
 

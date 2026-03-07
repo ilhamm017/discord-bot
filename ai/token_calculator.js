@@ -3,7 +3,7 @@
  * This helps with TPM (Tokens Per Minute) rate limiting
  */
 
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 
 /**
  * Rough token estimation (1 token ≈ 4 characters for English, ≈ 2-3 for Indonesian)

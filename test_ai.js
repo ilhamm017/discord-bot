@@ -1,4 +1,4 @@
-const { runAiAgent } = require("./functions/ai/controller");
+const { runAiAgent } = require("./ai/controller");
 
 async function test() {
     console.log("Testing AI agent...");

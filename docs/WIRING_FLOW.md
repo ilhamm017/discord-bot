@@ -14,13 +14,13 @@
 
 ## AI router (chat) flow
 - `utils/ai/ai_chat.js` handles call-name, memory extraction, summary checks, and bot docs locally.
-- Router LLM call uses `functions/ai/completion.chatCompletion` with server context + history.
+- Router LLM call uses `ai/completion.chatCompletion` with server context + history.
 - Allowed commands for routing come from `message.client.commands` with fallback `AI_COMMANDS_FALLBACK`.
 - Router parse -> command executes via `messageCreate` or fallback `generateAiReply`.
 
 ## AI command implementations
-- `discord/tools/ai/ringkas.js` -> `functions/tools/ai/summarization.generateSummary` -> `functions/ai/completion.chatCompletion`.
-- `discord/tools/ai/ucapkan.js` -> `functions/tools/ai/message_generation.generateAiMessage` -> `functions/ai/completion.chatCompletion`.
+- `discord/tools/ai/ringkas.js` -> `functions/tools/ai/summarization.generateSummary` -> `ai/completion.chatCompletion`.
+- `discord/tools/ai/ucapkan.js` -> `functions/tools/ai/message_generation.generateAiMessage` -> `ai/completion.chatCompletion`.
 - `discord/tools/ai/member.js` + `cek.js` -> `functions/tools/member_logic`.
 - `discord/tools/ai/panggil.js`, `jelaskan.js`, `rangkum.js` are local/alias handling.
 
@@ -37,9 +37,9 @@
 - `discord/player/panel.js` renders/updates the control panel message.
 
 ## Platform tool-calling stack (currently not wired to chat)
-- `functions/ai/controller.js` runs tool-capable agent via `functions/ai/completion`.
-- `functions/ai/tool_definitions.js` defines tool schemas (chat, identity, moderation, messaging, web, memory, session, reminders, audit).
-- `functions/ai/tool_handler.js` dispatches tool calls to `functions/platform/*` and logs via `logToolInvocation`.
+- `ai/controller.js` runs tool-capable agent via `ai/completion`.
+- `ai/tool_definitions.js` defines tool schemas (chat, identity, moderation, messaging, web, memory, session, reminders, audit).
+- `ai/tool_handler.js` dispatches tool calls to `functions/platform/*` and logs via `logToolInvocation`.
 - `functions/platform/index.js` re-exports `chat_logic`, `identity_logic`, `core_logic`, `policy_logic`.
 
 ## Platform logic map

@@ -1,12 +1,19 @@
 const { chatCompletion } = require("./completion");
 const tools = require("./tool_definitions");
 const { handleToolCalls } = require("./tool_handler");
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 
 const { YOVA_PERSONA } = require("./persona");
-const { formatMemberList } = require("../utils/member_list_format");
+const { formatMemberList } = require("../functions/utils/member_list_format");
 
 const SYSTEM_PROMPT = YOVA_PERSONA;
+const COMPACT_SYSTEM_PROMPT = [
+    "Kamu Yova, asisten Discord yang ramah dan jelas.",
+    "Gunakan Bahasa Indonesia natural, ringkas, dan sopan.",
+    "Jika tidak perlu aksi/tool, balas langsung ke pertanyaan user.",
+    'Output wajib JSON valid: {"type":"final","message":"..."} atau {"type":"tool_call",...}.',
+    "Jangan tampilkan JSON mentah atau detail teknis ke user.",
+].join(" ");
 
 /**
  * Parses the model output to ensure it's valid JSON according to the strict rules.
@@ -82,15 +89,33 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
     });
 
     const { analyzeComplexity } = require("./complexity_analyzer");
-    const { intent, needsMentions } = analyzeComplexity(userInput, { messages: messageHistory });
+    const { intent, needsHistory, needsTool } = analyzeComplexity(userInput, { messages: messageHistory });
+    let usedTools = false;
+    const buildMeta = () => ({
+        intent,
+        needsHistory,
+        needsTool,
+        usedTools,
+    });
 
-    let systemMessage = SYSTEM_PROMPT;
+    const useCompactPrompt =
+        !context.isReply &&
+        !needsTool &&
+        !needsHistory &&
+        intent === "general";
+    const maxTokensForTurn = useCompactPrompt ? 220 : 1500;
 
-    // Add user info (Essentials)
-    if (context.userSummary) systemMessage += `\n\n[USER INFO]\n${context.userSummary}`;
+    let systemMessage = useCompactPrompt ? COMPACT_SYSTEM_PROMPT : SYSTEM_PROMPT;
 
-    // Minimal Context IDs (For tool calls auto-injection)
-    systemMessage += `\n\n[IDs]\nGuild: ${context.guildId}\nChannel: ${context.channelId}`;
+    // Add user info only when using full routing prompt.
+    if (!useCompactPrompt && context.userSummary) {
+        systemMessage += `\n\n[USER INFO]\n${context.userSummary}`;
+    }
+
+    // Keep IDs only for full mode (mainly needed for tool execution path).
+    if (!useCompactPrompt) {
+        systemMessage += `\n\n[IDs]\nGuild: ${context.guildId}\nChannel: ${context.channelId}`;
+    }
 
     let conversationHistory = [
         { role: "system", content: systemMessage },
@@ -99,10 +124,10 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
     ];
 
     const quickList = await tryHandleMemberListRequest(userInput, context);
-    if (quickList) return { type: "final", message: quickList };
+    if (quickList) return { type: "final", message: quickList, meta: buildMeta() };
 
     const quick = await tryHandleMemberPagination(userInput, context);
-    if (quick) return { type: "final", message: quick };
+    if (quick) return { type: "final", message: quick, meta: buildMeta() };
 
     let iterations = 0;
     while (iterations < maxIterations) {
@@ -111,7 +136,7 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
         const response = await chatCompletion({
             messages: conversationHistory,
             temperature: 0.1, // Low temperature for consistency with JSON rules
-            maxTokens: 1500
+            maxTokens: maxTokensForTurn
         }, {
             tools: allowedTools,
             tool_choice: "auto",
@@ -120,11 +145,12 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
 
         // Case 1: Model wants to call a native tool (handled by completion.js returning message with tool_calls)
         if (response && response.tool_calls) {
+            usedTools = true;
             conversationHistory.push(response);
             const toolResults = await handleToolCalls(response.tool_calls, context);
             const direct = buildDirectToolResponse(response.tool_calls, toolResults, context);
             if (direct) {
-                return { type: 'final', message: direct };
+                return { type: 'final', message: direct, meta: buildMeta() };
             }
             conversationHistory.push(...toolResults);
             continue; // Go back to LLM with tool results
@@ -139,17 +165,19 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
             // Fallback: try to nudge the model or wrap it
             return {
                 type: "final",
-                message: content
+                message: content,
+                meta: buildMeta(),
             };
         }
 
         // Case 1: Model wants to call a native tool
         if (response && response.tool_calls) {
+            usedTools = true;
             conversationHistory.push(response);
             const toolResults = await handleToolCalls(response.tool_calls, context);
             const direct = buildDirectToolResponse(response.tool_calls, toolResults, context);
             if (direct) {
-                return { type: 'final', message: direct };
+                return { type: 'final', message: direct, meta: buildMeta() };
             }
             conversationHistory.push(...toolResults);
             continue; // Go back to LLM with tool results
@@ -191,8 +219,9 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
             };
 
             const toolOutput = await handleToolCalls([pseudoToolCall], context);
+            usedTools = true;
             const direct = buildDirectToolResponse([pseudoToolCall], toolOutput, context);
-            if (direct) return { type: 'final', message: direct };
+            if (direct) return { type: 'final', message: direct, meta: buildMeta() };
 
             conversationHistory.push({ role: "assistant", content: JSON.stringify(parsed) });
             conversationHistory.push(...toolOutput);
@@ -207,18 +236,19 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
             // Fallback empty check
             if (!msg) {
                 logger.warn("AI returned final type but no message content found.", parsed);
-                msg = "Hmm, aku bingung mau jawab apa...";
+                msg = "Maaf, aku belum bisa menyusun jawaban yang tepat.";
             }
 
-            return { type: 'final', message: msg };
+            return { type: 'final', message: msg, meta: buildMeta() };
         }
 
-        return parsed;
+        return { ...parsed, meta: buildMeta() };
     }
 
     return {
         type: "final",
-        message: "I'm sorry, I reached the maximum number of steps trying to process your request."
+        message: "Maaf, prosesnya belum selesai setelah beberapa langkah. Coba kirim ulang permintaannya.",
+        meta: buildMeta(),
     };
 }
 
@@ -234,11 +264,11 @@ function buildDirectToolResponse(toolCalls = [], toolResults = [], context = {})
         if (res.success) {
             const song = res.title || "lagunya";
             const templates = [
-                `Hmph, ya udah nih aku puterin **${song}**. Puas? 🙄`,
-                `Capek tau disuruh-suruh terus... tapi buat kali ini aja ya! **${song}** masuk antrian. 😏`,
-                `Lagu pilihanmu... lumayan juga sih. Nih, **${song}** udah jalan!`,
-                `Gak usah senyum-senyum gitu, aku cuma jalanin tugas kok! Memutar **${song}**.`,
-                `Bawel amat sih! Iya-iya, nih **${song}** udah aku pasang. *Hmph!*`
+                `Siap, **${song}** sedang diputar.`,
+                `**${song}** sudah ditambahkan ke antrian.`,
+                `Memutar **${song}** sekarang.`,
+                `Oke, **${song}** berhasil diproses.`,
+                `Berhasil, **${song}** sudah dijalankan.`
             ];
             return templates[Math.floor(Math.random() * templates.length)];
         }
@@ -252,11 +282,11 @@ function buildDirectToolResponse(toolCalls = [], toolResults = [], context = {})
 
         if (res.locationDescription) {
             const templates = [
-                `Nih, aku bisikin ya... ${res.locationDescription} Gak usah bilang-bilang aku yang kasih tau! 🤫`,
-                `Kepo banget sih! Tapi ya udah, ${res.locationDescription} Tuh, puas? 🙄`,
-                `Cuma kali ini aja ya aku bantu cariin. ${res.locationDescription}`,
-                `Hmph, dasar penguntit. ${res.locationDescription} Awas aja kalo macem-macem. 😤`,
-                `Misi pencarian selesai! ${res.locationDescription} Gampang kan kalau ada Yova? 😎`
+                `${res.locationDescription}`,
+                `Lokasi ditemukan: ${res.locationDescription}`,
+                `Berikut info lokasinya: ${res.locationDescription}`,
+                `Ditemukan: ${res.locationDescription}`,
+                `Informasi lokasi: ${res.locationDescription}`
             ];
             return templates[Math.floor(Math.random() * templates.length)];
         }
@@ -271,11 +301,11 @@ function buildDirectToolResponse(toolCalls = [], toolResults = [], context = {})
         // Check for success (either direct messageId or smart delivery object)
         if (res.success || res.messageId) {
             const templates = [
-                "Udah, udah aku sampein. Jangan nyuruh-nyuruh lagi ya! 😤",
-                "Pesan terkirim. Semoga dia nggak keganggu. 🙄",
-                "Sip, udah masuk tuh pesannya. Cepet kan? 😎",
-                "Oke, done. Awas aja kalau ternyata nggak penting. 😑",
-                "Misi berhasil. Pesan sudah mendarat dengan aman! 📨"
+                "Pesan berhasil dikirim.",
+                "Sudah, pesannya tersampaikan.",
+                "Selesai, pesan sudah masuk.",
+                "Berhasil, pesan sudah dikirim.",
+                "Oke, pesan sudah diteruskan."
             ];
             return templates[Math.floor(Math.random() * templates.length)];
         }
@@ -305,7 +335,7 @@ function buildDirectToolResponse(toolCalls = [], toolResults = [], context = {})
     }
 
     if (!Array.isArray(items) || items.length === 0) {
-        return "Gak nemu membernya. Cek lagi servernya bener nggak.";
+        return "Tidak menemukan data member. Coba cek lagi servernya.";
     }
 
     limit = Math.max(1, Math.min(Number.isFinite(limit) ? limit : DEFAULT_MEMBER_PAGE_SIZE, 50));
@@ -335,10 +365,10 @@ function buildDirectToolResponse(toolCalls = [], toolResults = [], context = {})
     }
     return context.source === "discord"
         ? {
-            content: `${message}\n\nUdah segitu aja.`,
+            content: `${message}\n\nDaftarnya sampai di sini.`,
             pagination: { kind: "member_list", offset, limit, total, hasMore }
         }
-        : `${message}\n\nUdah segitu aja.`;
+        : `${message}\n\nDaftarnya sampai di sini.`;
 }
 
 function isNextRequest(text = "") {
@@ -400,7 +430,7 @@ async function tryHandleMemberPagination(userInput, context = {}) {
     const state = memberListState.get(context.sessionId);
     if (!state) return "Belum ada daftar. Coba minta daftar member dulu ya.";
     if (!state.hasMore) {
-        return "Udah habis. Gak ada list berikutnya.";
+        return "Daftar sudah habis. Tidak ada halaman berikutnya.";
     }
     if (Date.now() - state.updatedAt > MEMBER_LIST_TTL_MS) {
         memberListState.delete(context.sessionId);
@@ -428,14 +458,14 @@ async function tryHandleMemberPagination(userInput, context = {}) {
     const toolResults = await handleToolCalls(toolCalls, context);
     const direct = buildDirectToolResponse(toolCalls, toolResults, context);
     if (!direct) return null;
-    if (direct.startsWith("Gak nemu membernya")) {
+    if (direct.startsWith("Tidak menemukan data member")) {
         memberListState.set(context.sessionId, {
             offset: state.offset,
             limit: state.limit,
             hasMore: false,
             updatedAt: Date.now()
         });
-        return "Udah habis. Gak ada list berikutnya.";
+        return "Daftar sudah habis. Tidak ada halaman berikutnya.";
     }
     return direct;
 }

@@ -24,9 +24,9 @@ node simple_cli.js
 ## Current AI Configuration
 
 ### Models
-- **Primary**: Gemma models (gemma-3-1b-it, gemma-3-4b-it, gemma-3-12b-it, gemma-3-27b-it)
+- **Primary**: Gemma models (gemma-3n-e2b-it, gemma-3-4b-it, gemma-3-12b-it, gemma-3-27b-it)
 - **Tier System**: Automatic selection based on query complexity
-  - Lightweight: gemma-3-1b-it, gemma-3n-e2b-it
+  - Lightweight: gemma-3n-e2b-it, gemma-3-4b-it
   - Balanced: gemma-3-4b-it, gemma-3n-e4b-it  
   - Advanced: gemma-3-12b-it
   - Premium: gemma-3-27b-it
@@ -54,7 +54,7 @@ Edit `config.json` to change model tiers:
 ```json
 {
   "google_model_tiers": {
-    "lightweight": ["gemma-3-1b-it", "gemma-3n-e2b-it"],
+    "lightweight": ["gemma-3n-e2b-it", "gemma-3-4b-it"],
     "balanced": ["gemma-3-4b-it", "gemma-3n-e4b-it"],
     "advanced": ["gemma-3-12b-it"],
     "premium": ["gemma-3-27b-it"]

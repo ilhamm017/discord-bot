@@ -1,5 +1,6 @@
 const { ChannelType } = require("discord.js");
-const { connectToVoice } = require("../../player/voice");
+const { getOrCreateState } = require("../../player/voice");
+const lavalinkService = require("../../player/LavalinkManager");
 const logger = require("../../../utils/logger");
 
 let config = {};
@@ -15,6 +16,59 @@ const {
   resolveDefaultVoiceChannel
 } = require("../../../functions/tools/music/connection_logic");
 
+async function waitForConnected(player, timeoutMs = 6000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (player?.connected) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return Boolean(player?.connected);
+}
+
+async function connectWithLavalink(targetChannel) {
+  const manager = lavalinkService.getManager();
+  if (!manager) {
+    throw new Error("Lavalink manager belum siap.");
+  }
+
+  const guildId = targetChannel.guild.id;
+  let player = manager.players.get(guildId);
+  if (!player) {
+    player = await manager.createPlayer({
+      guildId,
+      voiceChannelId: targetChannel.id,
+      textChannelId: null,
+      selfDeaf: true,
+      selfMute: false,
+      volume: 100,
+    });
+  }
+
+  if (player.voiceChannelId !== targetChannel.id) {
+    if (player.voiceChannelId) {
+      await player.changeVoiceState({
+        voiceChannelId: targetChannel.id,
+        selfDeaf: true,
+        selfMute: false,
+      });
+    } else {
+      player.options.voiceChannelId = targetChannel.id;
+    }
+  }
+
+  if (!player.connected) {
+    player.options.voiceChannelId = targetChannel.id;
+    await player.connect();
+    const connected = await waitForConnected(player, 6000);
+    if (!connected) {
+      throw new Error("Lavalink gagal tersambung ke voice channel.");
+    }
+  }
+
+  const state = getOrCreateState(guildId);
+  state.channelId = targetChannel.id;
+  state.engine = "lavalink";
+}
 
 module.exports = {
   name: "join",
@@ -32,7 +86,7 @@ module.exports = {
       }
 
       try {
-        await connectToVoice(targetChannel);
+        await connectWithLavalink(targetChannel);
         return message.reply(`Masuk ke voice: ${targetChannel.name}`);
       } catch (error) {
         logger.error("Join voice failed.", error);
@@ -67,7 +121,7 @@ module.exports = {
     }
 
     try {
-      await connectToVoice(targetChannel);
+      await connectWithLavalink(targetChannel);
       return message.reply(`Masuk ke voice: ${targetChannel.name}`);
     } catch (error) {
       logger.error("Join voice failed.", error);

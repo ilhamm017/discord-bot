@@ -1,5 +1,5 @@
 // functions/tools/ai/summarization.js
-const { chatCompletion } = require("../../ai/completion");
+const { chatCompletion } = require("../../../ai/completion");
 const { truncateText } = require("../../utils/formatting");
 
 const MAX_CHARS_PER_MESSAGE = 200;

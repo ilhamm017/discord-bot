@@ -10,7 +10,15 @@
     "start": "node index.js",
     "dev": "node index.js",
     "cli": "node cli.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "config:web": "node config/web/server.js",
+    "test": "npm run test:intent-routing && npm run test:lavalink && npm run test:media-cache && npm run test:panel-history && npm run test:myinstants && npm run test:lavalink-config-web && npm run test:ai-voice-budget",
+    "test:intent-routing": "node tests/ai_intent_routing.test.js",
+    "test:lavalink": "node tests/lavalink_voice_update.test.js",
+    "test:media-cache": "node tests/media_cache.test.js",
+    "test:panel-history": "node tests/panel_history.test.js",
+    "test:myinstants": "node tests/myinstants.test.js",
+    "test:lavalink-config-web": "node tests/lavalink_config_web.test.js",
+    "test:ai-voice-budget": "node tests/ai_voice_budget.test.js"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.0",
@@ -18,7 +26,6 @@
     "@snazzah/davey": "^0.1.9",
     "better-sqlite3": "^12.6.2",
     "discord.js": "^14.25.1",
-    "ffmpeg-static": "^5.3.0",
     "lavalink-client": "^2.8.0",
     "play-dl": "^1.9.7",
     "sequelize": "^6.37.7",

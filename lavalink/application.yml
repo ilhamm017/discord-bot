@@ -3,7 +3,7 @@ server: # server settings
   address: 0.0.0.0
 lavalink:
   plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.16.0"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.0"
       repository: "https://maven.lavalink.dev/releases"
       snapshot: false
   server:
@@ -17,14 +17,14 @@ lavalink:
       mixer: false
       http: true
       local: false
-    bufferDurationMs: 400 # 400ms buffer for better responsiveness
-    frameBufferDurationMs: 1000 # 1s frame buffer
-    opusEncodingQuality: 7 # Reduced slightly to save CPU/Bandwidth
-    resamplingQuality: MEDIUM # Lowered to MEDIUM to reduce CPU load
-    trackStuckThresholdMs: 10000 # The threshold for how long a track can be stuck. A stuck track will certainly stop playing eventually.
+    bufferDurationMs: 1200 # Larger jitter buffer to reduce audible stutter on unstable links
+    frameBufferDurationMs: 8000 # Keep more decoded frames to absorb short network/CPU hiccups
+    opusEncodingQuality: 10 # Higher Opus encoder quality for cleaner output
+    resamplingQuality: HIGH # Higher resampling quality for better fidelity
+    trackStuckThresholdMs: 30000 # Avoid premature "stuck" stop on transient jitter spikes
     useSeekGhosting: true # Seek ghosting is a technique to prevent audio artifacts when seeking by applying a small crossfade.
     youtubePlaylistLoadLimit: 6 # Number of pages at 100 per page
-    playerUpdateInterval: 5 # How frequently to send player updates to clients, in seconds
+    playerUpdateInterval: 1 # How frequently to send player updates to clients, in seconds
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true

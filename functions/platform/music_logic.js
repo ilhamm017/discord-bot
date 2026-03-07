@@ -2,18 +2,27 @@ const { client } = require("../../discord/client");
 const { enqueueTrack, stopPlayback, skipTrack, togglePause, restoreQueue, getState } = require("../../discord/player/queue");
 const { searchYoutube } = require("../tools/music/youtube_logic");
 const { isSpotifyConfigured, searchSpotifyTracks, resolveSpotifyTrackToYoutube } = require("../../utils/common/spotify");
+const {
+    buildMyInstantsTrack,
+    detectMyInstantsRequest,
+    resolveMyInstantsTrack,
+} = require("../../utils/common/myinstants");
 const logger = require("../../utils/logger");
 
 /**
  * Music Platform Logic for AI Tool Calling
  */
 
-async function playMusic(guildId, userId, channelId, query, targetUserId = null) {
+async function playMusic(guildId, userId, channelId, query, targetUserId = null, source = "auto") {
     try {
         const guild = await client.guilds.fetch(guildId);
 
         // Use targetUserId if provided, otherwise use the caller (userId)
-        const finalTargetIdOrName = targetUserId || userId;
+        const normalizedTargetInput =
+            typeof targetUserId === "string"
+                ? targetUserId.trim().replace(/^<@!?(\d+)>$/, "$1")
+                : targetUserId;
+        const finalTargetIdOrName = normalizedTargetInput || userId;
         let member;
 
         const normalizeText = (text) => String(text || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -59,56 +68,85 @@ async function playMusic(guildId, userId, channelId, query, targetUserId = null)
             await restoreQueue(voiceChannel).catch(() => { });
         }
 
-        let tracks = [];
+        const myInstantsRequest = detectMyInstantsRequest(query, { source });
+        let track = null;
 
-        // 1. Search Spotify if configured
-        if (isSpotifyConfigured()) {
+        if (myInstantsRequest.shouldUseMyInstants) {
             try {
-                const spotifyResults = await searchSpotifyTracks(query, 10);
-                if (spotifyResults.length > 0) {
-                    // Start resolving the first one immediately as the priority
-                    const resolved = await resolveSpotifyTrackToYoutube(spotifyResults[0]);
-                    if (resolved) {
-                        tracks.push(resolved);
+                const resolved = await resolveMyInstantsTrack(query, {
+                    source,
+                    limit: 1,
+                });
+                if (resolved?.audioUrl) {
+                    track = buildMyInstantsTrack(resolved, {
+                        requestedBy: member.user.tag,
+                        requestedById: userId,
+                        requestedByTag: member.user.tag,
+                    });
+                }
+            } catch (error) {
+                logger.warn("MyInstants search failed in playMusic tool.", error);
+            }
+        } else {
+            let tracks = [];
+
+            // 1. Search Spotify if configured
+            if (isSpotifyConfigured()) {
+                try {
+                    const spotifyResults = await searchSpotifyTracks(query, 10);
+                    if (spotifyResults.length > 0) {
+                        // Start resolving the first one immediately as the priority
+                        const resolved = await resolveSpotifyTrackToYoutube(spotifyResults[0]);
+                        if (resolved) {
+                            tracks.push(resolved);
+                        }
+                    }
+                } catch (err) {
+                    logger.debug("Spotify search failed in playMusic tool.", err);
+                }
+            }
+
+            // 2. Search YouTube (Always as fallback or additional)
+            if (tracks.length === 0) {
+                const ytResults = await searchYoutube(query, 10);
+                if (ytResults && ytResults.length > 0) {
+                    tracks.push({
+                        url: ytResults[0].url,
+                        title: ytResults[0].title,
+                        durationMs: ytResults[0].durationMs,
+                        thumbnail: ytResults[0].thumbnail
+                    });
+                }
+            }
+
+            if (tracks.length === 0) {
+                return { error: "Yova gak nemu lagunya... coba judul lain deh." };
+            }
+
+            const selected = tracks[0];
+            track = {
+                url: selected.url,
+                title: selected.title,
+                requestedBy: member.user.tag,
+                requestedById: userId,
+                requestedByTag: member.user.tag,
+                info: {
+                    video_details: {
+                        title: selected.title,
+                        durationInSec: selected.durationMs ? selected.durationMs / 1000 : 0,
+                        thumbnails: selected.thumbnail ? [{ url: selected.thumbnail }] : []
                     }
                 }
-            } catch (err) {
-                logger.debug("Spotify search failed in playMusic tool.", err);
-            }
+            };
         }
 
-        // 2. Search YouTube (Always as fallback or additional)
-        if (tracks.length === 0) {
-            const ytResults = await searchYoutube(query, 10);
-            if (ytResults && ytResults.length > 0) {
-                tracks.push({
-                    url: ytResults[0].url,
-                    title: ytResults[0].title,
-                    durationMs: ytResults[0].durationMs,
-                    thumbnail: ytResults[0].thumbnail
-                });
-            }
+        if (!track) {
+            return {
+                error: myInstantsRequest.shouldUseMyInstants
+                    ? "Yova gak nemu sound effect MyInstants yang cocok."
+                    : "Yova gak nemu lagunya... coba judul lain deh.",
+            };
         }
-
-        if (tracks.length === 0) {
-            return { error: "Yova gak nemu lagunya... coba judul lain deh." };
-        }
-
-        const selected = tracks[0];
-        const track = {
-            url: selected.url,
-            title: selected.title,
-            requestedBy: member.user.tag,
-            requestedById: userId,
-            requestedByTag: member.user.tag,
-            info: {
-                video_details: {
-                    title: selected.title,
-                    durationInSec: selected.durationMs ? selected.durationMs / 1000 : 0,
-                    thumbnails: selected.thumbnail ? [{ url: selected.thumbnail }] : []
-                }
-            }
-        };
 
         // 2. Play via Enqueue System (Ensures Unified Queue & Panel update)
         const { enqueueTrack } = require("../../discord/player/queue");

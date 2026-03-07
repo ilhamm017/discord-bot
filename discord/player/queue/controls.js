@@ -1,9 +1,13 @@
-const { AudioPlayerStatus } = require("@discordjs/voice");
-const { getGuildState, connectToVoice, getOrCreateState } = require("../voice");
+const { getGuildState, getOrCreateState } = require("../voice");
 const { persistQueueState, notifyPanel } = require("./state");
 const { ensureQueueState, playNext } = require("./playback");
 const { loadQueueState, clearQueueState, saveUserQueueHistory, loadUserQueueHistory } = require("../../../storage/db");
 const logger = require("../../../utils/logger");
+const {
+    markYoutubeTrack,
+    primeMyInstantsTrack,
+    primeYoutubeTrack,
+} = require("../../../utils/common/media_cache");
 
 
 async function shuffleQueue(guildId) {
@@ -45,15 +49,8 @@ async function setRepeatMode(guildId, mode) {
 
 async function enqueueTracks(voiceChannel, tracks, options = {}) {
     const PlayerManager = require("../PlayerManager");
-    const engineType = await PlayerManager.getEngineType(voiceChannel.guild.id);
-
-    let state;
-    if (engineType === "lavalink") {
-        state = getOrCreateState(voiceChannel.guild.id);
-        state.channelId = voiceChannel.id;
-    } else {
-        state = await connectToVoice(voiceChannel);
-    }
+    const state = getOrCreateState(voiceChannel.guild.id);
+    state.channelId = voiceChannel.id;
 
     ensureQueueState(state, voiceChannel.guild.id);
 
@@ -64,7 +61,9 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
         state.panelChannelId = options.textChannelId;
     }
 
-    const entries = Array.isArray(tracks) ? tracks.filter(Boolean) : [];
+    const entries = (Array.isArray(tracks) ? tracks : [])
+        .filter(Boolean)
+        .map((track) => markYoutubeTrack(track));
     if (entries.length === 0) {
         return {
             state,
@@ -75,14 +74,27 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
     }
 
     const wasEmpty = state.queue.length === 0;
+    const startPosition = state.queue.length + 1;
     state.queue.push(...entries);
     const added = entries.length;
 
-    // Ensure engine is set to help UI detection
-    if (!state.engine) {
-        const engine = await PlayerManager.getEngine(voiceChannel.guild.id);
-        state.engine = engine.type || "ffmpeg";
+    for (const track of entries) {
+        const primePromise = track?.source === "myinstants"
+            ? primeMyInstantsTrack(track)
+            : primeYoutubeTrack(track);
+
+        primePromise?.catch((error) => {
+            logger.debug("Background audio cache prime failed.", {
+                source: track?.source || null,
+                videoId: track?.youtubeVideoId || null,
+                cacheKey: track?.cacheKey || null,
+                message: error?.message || String(error),
+            });
+        });
     }
+
+    // Ensure engine is set to help UI detection
+    state.engine = "lavalink";
 
     await persistQueueState(state);
     notifyPanel(state, "enqueue");
@@ -95,14 +107,25 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
 
     let started = false;
     const isPlaying = await PlayerManager.isPlaying(voiceChannel.guild.id);
+    const hasInvalidPointer =
+        state.currentIndex < -1 || state.currentIndex >= state.queue.length;
+    const shouldAutoStart = wasEmpty || !isPlaying || state.currentIndex < 0 || hasInvalidPointer;
 
     // Auto-start if nothing was playing OR queue was completely empty (meaning no loop running)
-    if (wasEmpty || !isPlaying) {
-        logger.info(`Auto-starting playback for guild ${voiceChannel.guild.id} (wasEmpty=${wasEmpty}, isPlaying=${isPlaying})`);
+    if (shouldAutoStart) {
+        logger.info(
+            `Auto-starting playback for guild ${voiceChannel.guild.id} ` +
+            `(wasEmpty=${wasEmpty}, isPlaying=${isPlaying}, currentIndex=${state.currentIndex})`
+        );
         started = Boolean(await playNext(state));
+    } else {
+        logger.debug(
+            `Playback not auto-started for guild ${voiceChannel.guild.id} ` +
+            `(wasEmpty=${wasEmpty}, isPlaying=${isPlaying}, currentIndex=${state.currentIndex})`
+        );
     }
 
-    return { state, added, started };
+    return { state, added, startPosition, started };
 }
 
 async function enqueueTrack(voiceChannel, track, options = {}) {
@@ -137,7 +160,9 @@ async function restoreQueue(voiceChannel, options = {}) {
         return { restored: false, state: null, queueLength: 0 };
     }
 
-    const state = await connectToVoice(voiceChannel);
+    const state = getOrCreateState(guildId);
+    state.channelId = voiceChannel.id;
+
     ensureQueueState(state, guildId);
 
     if (options.textChannelId) {
@@ -150,6 +175,7 @@ async function restoreQueue(voiceChannel, options = {}) {
     state.queue = persisted.queue;
     state.currentIndex = -1;
     state.repeatMode = persisted.repeatMode || "off";
+    state.engine = "lavalink";
     state.playToken = (state.playToken || 0) + 1;
 
     await persistQueueState(state);

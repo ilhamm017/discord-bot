@@ -2,7 +2,7 @@
  * Test script for Yova's new concise persona
  */
 
-const { runAiAgent } = require('./functions/ai/controller');
+const { runAiAgent } = require('./ai/controller');
 
 async function testPersonaEfficiency() {
     console.log('\n=== Testing Yova Personality Efficiency ===\n');

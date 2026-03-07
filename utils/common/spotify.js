@@ -1,11 +1,12 @@
 const play = require("play-dl");
+const path = require("path");
 const logger = require("../logger");
 const { getSpotifyCache, saveSpotifyCache } = require("../../storage/db");
 const { searchWithYtDlp } = require("./ytdlp");
 
 let config = {};
 try {
-  config = require("../config.json");
+  config = require(path.join(__dirname, "../../config.json"));
 } catch (error) {
   config = {};
 }
@@ -252,14 +253,54 @@ function pickBestResult(results, durationMs) {
   return best || fallback;
 }
 
+async function searchYoutubeCandidatesForSpotify(query, limit = 5) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 10));
+
+  // Prefer yt-dlp first because it's currently more resilient to YouTube payload changes.
+  try {
+    const ytdlpResults = await searchWithYtDlp(query, safeLimit);
+    if (Array.isArray(ytdlpResults) && ytdlpResults.length > 0) {
+      return ytdlpResults;
+    }
+  } catch (error) {
+    logger.debug("yt-dlp search failed for Spotify resolver.", {
+      message: error?.message || String(error),
+    });
+  }
+
+  try {
+    const playResults = await play.search(query, { limit: safeLimit });
+    if (Array.isArray(playResults)) return playResults;
+  } catch (error) {
+    logger.debug("play-dl search failed for Spotify resolver.", {
+      message: error?.message || String(error),
+    });
+  }
+
+  return [];
+}
+
 async function resolveSpotifyTrackToYoutube(track) {
   if (!track?.id) return null;
   const cached = await getSpotifyCache(track.id);
   if (cached?.youtubeUrl) {
     const title = cached.title || `${track.name} - ${track.artists.join(", ")}`;
+    const videoId =
+      (typeof cached.youtubeUrl === "string" && cached.youtubeUrl.includes("youtube"))
+        ? (() => {
+            try {
+              return play.extractID(cached.youtubeUrl);
+            } catch (error) {
+              return null;
+            }
+          })()
+        : null;
     return {
       url: cached.youtubeUrl,
       title,
+      source: "youtube",
+      youtubeVideoId: videoId,
+      originalUrl: cached.youtubeUrl,
       spotify: track,
     };
   }
@@ -267,24 +308,7 @@ async function resolveSpotifyTrackToYoutube(track) {
   const query = `${track.artists.join(" ")} - ${track.name}`.trim();
   if (!query) return null;
 
-  let results = [];
-  try {
-    results = await play.search(query, { limit: 5 });
-  } catch (error) {
-    logger.debug(
-      "Spotify search on YouTube failed, trying yt-dlp fallback.",
-      error
-    );
-  }
-
-  if (!Array.isArray(results) || results.length === 0) {
-    try {
-      results = await searchWithYtDlp(query, 5);
-    } catch (error) {
-      logger.warn("Spotify search fallback failed.", error);
-      return null;
-    }
-  }
+  const results = await searchYoutubeCandidatesForSpotify(query, 5);
 
   const best = pickBestResult(results, track.durationMs);
   if (!best) return null;
@@ -303,7 +327,14 @@ async function resolveSpotifyTrackToYoutube(track) {
     youtubeUrl: url,
   });
 
-  return { url, title, spotify: track };
+  return {
+    url,
+    title,
+    source: "youtube",
+    youtubeVideoId: best.id || null,
+    originalUrl: url,
+    spotify: track,
+  };
 }
 
 async function resolveSpotifyTracks(tracks) {

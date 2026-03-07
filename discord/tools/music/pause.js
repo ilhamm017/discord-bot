@@ -22,7 +22,7 @@ module.exports = {
       return message.reply("Kamu harus berada di voice channel yang sama dengan bot.");
     }
 
-    const result = togglePause(message.guild.id);
+    const result = await togglePause(message.guild.id);
     if (result.status === "paused") {
       return message.reply("Musik dipause.");
     }

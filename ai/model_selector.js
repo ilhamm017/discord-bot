@@ -1,4 +1,4 @@
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 
 // Track rate-limited models: model -> { blockedUntil: timestamp }
 const rateLimitTracker = new Map();
@@ -9,7 +9,7 @@ const rateLimitTracker = new Map();
 function getConfig() {
     let config = {};
     try {
-        config = require("../../config.json");
+        config = require("../config.json");
     } catch (error) {
         config = {};
     }
@@ -30,7 +30,7 @@ function selectModel(tier, config = null, provider = 'google') {
 
     const tierKey = `${provider}_model_tiers`;
     const tiers = config[tierKey] || (provider === 'google' ? {
-        lightweight: ["gemma-3-4b-it", "gemma-3-1b-it"],
+        lightweight: ["gemma-3n-e2b-it", "gemma-3-4b-it"],
         balanced: ["gemma-3-12b-it", "gemma-3-4b-it"],
         advanced: ["gemma-3-27b-it", "gemma-3-12b-it"],
         premium: ["gemma-3-27b-it"]

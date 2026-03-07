@@ -1,7 +1,7 @@
 const readline = require("readline");
 const { connectDB } = require("../../storage/sequelize"); // Adjust path if necessary. Based on index.js, it's ./storage/sequelize
 // from /functions/adapters/cli.js, path to storage is ../../storage/sequelize
-const { runAiAgent } = require("../ai/controller"); // ../ai/controller
+const { runAiAgent } = require("../../ai/controller");
 
 async function startCli() {
     try {

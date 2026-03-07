@@ -2,6 +2,7 @@ const { AudioPlayerStatus } = require("@discordjs/voice");
 const { enqueueTrack, enqueueTracks, getState } = require("../../../player/queue");
 const { updateControlPanel } = require("../../../player/panel");
 const logger = require("../../../../utils/logger");
+const { markYoutubeTrack, primeYoutubeTrack } = require("../../../../utils/common/media_cache");
 const {
     isSpotifyConfigured,
     fetchSpotifyCollection,
@@ -31,20 +32,34 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
         return message.reply("Data Spotify kosong atau tidak bisa memetakan lagu ke YouTube.");
     }
 
-    const formattedTracks = tracks.map(t => ({
-        ...t,
-        requestedBy: message.author.tag,
-        requestedById: message.author.id,
-        requestedByTag: message.author.tag,
-        originUrl: query,
-    }));
+    const formattedTracks = tracks.map((t) => {
+        const track = markYoutubeTrack({
+            ...t,
+            requestedBy: message.author.tag,
+            requestedById: message.author.id,
+            requestedByTag: message.author.tag,
+            originUrl: query,
+        }, {
+            sourceUrl: t.originalUrl || t.url,
+            youtubeVideoId: t.youtubeVideoId || null,
+        });
+
+        primeYoutubeTrack(track)?.catch((error) => {
+            logger.debug("Background audio cache prime failed.", {
+                videoId: track?.youtubeVideoId || null,
+                message: error?.message || String(error),
+            });
+        });
+
+        return track;
+    });
 
 
     // Single Track
     if (tracks.length === 1) {
         let result;
         try {
-            result = await enqueueTrack(voiceChannel, tracks[0], {
+            result = await enqueueTrack(voiceChannel, formattedTracks[0], {
                 textChannelId: message.channel.id,
             });
         } catch (error) {
@@ -59,17 +74,17 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
         }
 
         if (result.started) {
-            return message.reply(`Memutar: ${tracks[0].title}`);
+            return message.reply(`Memutar: ${formattedTracks[0].title}`);
         }
         return message.reply(
-            `Ditambahkan ke antrian #${result.position}: ${tracks[0].title}`
+            `Ditambahkan ke antrian #${result.position}: ${formattedTracks[0].title}`
         );
     }
 
     // Playlist
     let result;
     try {
-        result = await enqueueTracks(voiceChannel, tracks, {
+        result = await enqueueTracks(voiceChannel, formattedTracks, {
             textChannelId: message.channel.id,
         });
     } catch (error) {

@@ -10,7 +10,11 @@ const {
     isSpotifyConfigured,
     searchSpotifyTracks,
 } = require("../../../../utils/common/spotify");
-const { buildSearchSelect } = require("./utils");
+const {
+    markYoutubeTrack,
+    primeYoutubeTrack,
+} = require("../../../../utils/common/media_cache");
+const { buildSearchSelect, shouldAutoPlaySearchQuery } = require("./utils");
 
 let config = {};
 try {
@@ -33,11 +37,57 @@ const {
     searchYoutube,
 } = require("../../../../functions/tools/music/youtube_logic");
 
+function prepareYoutubeTrack(baseTrack, options = {}) {
+    const track = markYoutubeTrack(baseTrack, {
+        sourceUrl: options.sourceUrl || baseTrack.originalUrl || baseTrack.url,
+        youtubeVideoId: options.youtubeVideoId || baseTrack.youtubeVideoId || null,
+    });
 
-async function handleYoutube(message, voiceChannel, query, validation) {
+    if (options.prime !== false) {
+        primeYoutubeTrack(track)?.catch((error) => {
+            logger.debug("Background audio cache prime failed.", {
+                videoId: track.youtubeVideoId,
+                message: error?.message || String(error),
+            });
+        });
+    }
+
+    return track;
+}
+
+
+async function handleYoutube(message, voiceChannel, query, validation, options = {}) {
+    const forceTopYoutube = Boolean(options?.forceTopYoutube);
+    const forceSelection = Boolean(options?.forceSelection);
     let url = query;
     let title;
     let info;
+
+    async function enqueueAndReply(track) {
+        let result;
+        try {
+            result = await enqueueTrack(voiceChannel, track, {
+                textChannelId: message.channel.id,
+            });
+        } catch (error) {
+            logger.error("Queue error.", error);
+            return message.reply("Gagal memutar audio.");
+        }
+
+        try {
+            await updateControlPanel(message.client, result.state);
+        } catch (error) {
+            logger.warn("Failed updating control panel.", error);
+        }
+
+        if (result.started) {
+            return message.reply(`Memutar: ${track.title}`);
+        }
+
+        return message.reply(
+            `Ditambahkan ke antrian #${result.position}: ${track.title}`
+        );
+    }
 
     // 1. Playlist
     if (validation === "playlist") {
@@ -55,13 +105,17 @@ async function handleYoutube(message, voiceChannel, query, validation) {
                     video?.url ||
                     (video?.id ? `https://www.youtube.com/watch?v=${video.id}` : null);
                 if (!videoUrl) return null;
-                return {
+                return prepareYoutubeTrack({
                     url: videoUrl,
                     title: video?.title || videoUrl,
                     requestedBy: message.author.tag,
                     requestedById: message.author.id,
                     requestedByTag: message.author.tag,
-                };
+                }, {
+                    sourceUrl: videoUrl,
+                    youtubeVideoId: video?.id || null,
+                    prime: false,
+                });
             })
             .filter(Boolean);
 
@@ -150,6 +204,37 @@ async function handleYoutube(message, voiceChannel, query, validation) {
             return message.reply("Tidak menemukan hasil untuk judul itu.");
         }
 
+        // Mention-target flow: always pick top YouTube result to avoid
+        // interactive select mismatch against target voice channel.
+        // Specific query (e.g. "maroon5 animals"): also auto-play top result.
+        if (!forceSelection && (forceTopYoutube || shouldAutoPlaySearchQuery(query)) && youtubeItems.length > 0) {
+            const picked = youtubeItems[0];
+            const track = prepareYoutubeTrack({
+                url: picked.url,
+                title: picked.title || picked.url,
+                requestedBy: message.author.tag,
+                requestedById: message.author.id,
+                requestedByTag: message.author.tag,
+                info: {
+                    video_details: {
+                        title: picked.title || picked.url,
+                        durationInSec: picked.durationMs
+                            ? Math.round(picked.durationMs / 1000)
+                            : 0,
+                        thumbnails: picked.thumbnail ? [{ url: picked.thumbnail }] : [],
+                    },
+                },
+            }, {
+                sourceUrl: picked.url,
+                youtubeVideoId: picked.videoId || null,
+            });
+            return enqueueAndReply(track);
+        }
+
+        if (forceTopYoutube && youtubeItems.length === 0) {
+            return message.reply("Tidak menemukan hasil YouTube untuk judul itu.");
+        }
+
         const selectMenu = buildSearchSelect(combined);
         if (!selectMenu) {
             return message.reply("Tidak menemukan hasil untuk judul itu.");
@@ -183,42 +268,19 @@ async function handleYoutube(message, voiceChannel, query, validation) {
 
     url = `https://www.youtube.com/watch?v=${videoId}`;
 
-    const track = {
+    const track = prepareYoutubeTrack({
         url,
         title: title || url,
         requestedBy: message.author.tag,
         requestedById: message.author.id,
         requestedByTag: message.author.tag,
-    };
+    }, {
+        sourceUrl: url,
+        youtubeVideoId: videoId,
+    });
     if (info) track.info = info;
 
-    let result;
-    try {
-        result = await enqueueTrack(voiceChannel, track, {
-            textChannelId: message.channel.id,
-        });
-    } catch (error) {
-        logger.error("Queue error.", error);
-        return message.reply("Gagal memutar audio.");
-    }
-
-    if (result.started) {
-        try {
-            await updateControlPanel(message.client, result.state);
-        } catch (error) {
-            logger.warn("Failed updating control panel.", error);
-        }
-        return message.reply(`Memutar: ${track.title}`);
-    }
-
-    try {
-        await updateControlPanel(message.client, result.state);
-    } catch (error) {
-        logger.warn("Failed updating control panel.", error);
-    }
-    return message.reply(
-        `Ditambahkan ke antrian #${result.position}: ${track.title}`
-    );
+    return enqueueAndReply(track);
 }
 
 module.exports = { handleYoutube };

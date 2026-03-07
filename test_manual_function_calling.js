@@ -2,8 +2,8 @@
  * Test script for manual function calling with Gemma models
  */
 
-const { chatCompletion } = require('./functions/ai/completion');
-const { runAiAgent } = require('./functions/ai/controller');
+const { chatCompletion } = require('./ai/completion');
+const { runAiAgent } = require('./ai/controller');
 const logger = require('./utils/logger');
 
 // Sample tools definition (simplified)

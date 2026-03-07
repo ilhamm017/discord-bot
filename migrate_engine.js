@@ -3,7 +3,7 @@ const { sequelize } = require("./storage/sequelize");
 async function migrate() {
     try {
         console.log("Adding 'engine' column to QueueStates table...");
-        await sequelize.query("ALTER TABLE QueueStates ADD COLUMN engine VARCHAR(255) DEFAULT 'ffmpeg';");
+        await sequelize.query("ALTER TABLE QueueStates ADD COLUMN engine VARCHAR(255) DEFAULT 'lavalink';");
         console.log("Migration successful!");
     } catch (error) {
         if (error.message.includes("duplicate column name")) {

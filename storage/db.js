@@ -5,7 +5,10 @@ const Favorite = require("../models/Favorite");
 const User = require("../models/User");
 const SpotifyCache = require("../models/SpotifyCache");
 const UserMemory = require("../models/UserMemory");
+const GuildPlaybackHistory = require("../models/GuildPlaybackHistory");
+const ElevenLabsUsage = require("../models/ElevenLabsUsage");
 const { Op } = require("sequelize");
+const { markYoutubeTrack } = require("../utils/common/media_cache");
 
 async function ensureReady() {
   try {
@@ -30,7 +33,7 @@ async function saveQueueState(guildId, state) {
         guildId,
         currentIndex: state.currentIndex,
         repeatMode: state.repeatMode || "off",
-        engine: state.engine || "ffmpeg",
+        engine: state.engine || "lavalink",
       }, { transaction: t });
 
       // 2. Overwrite Queue Items
@@ -43,7 +46,14 @@ async function saveQueueState(guildId, state) {
         title: track?.title || track?.url || "",
         requestedById: track?.requestedById || null,
         requestedByTag: track?.requestedByTag || null,
-        metadataJson: track?.info ? JSON.stringify(track.info) : null,
+        metadataJson: JSON.stringify({
+          info: track?.info || null,
+          originalUrl: track?.originalUrl || track?.originUrl || track?.url || null,
+          cachedUrl: track?.cachedUrl || null,
+          youtubeVideoId: track?.youtubeVideoId || null,
+          source: track?.source || null,
+          requestedBy: track?.requestedBy || null,
+        }),
       }));
 
       if (items.length > 0) {
@@ -70,20 +80,51 @@ async function loadQueueStateAsync(guildId) {
       order: [["position", "ASC"]],
     });
 
-    const queue = items.map((item) => ({
-      url: item.url,
-      title: item.title,
-      requestedById: item.requestedById || null,
-      requestedByTag: item.requestedByTag || null,
-      requestedBy: item.requestedByTag || item.requestedById || "-",
-      info: item.metadataJson ? JSON.parse(item.metadataJson) : null,
-    }));
+    const queue = items.map((item) => {
+      let metadata = null;
+      try {
+        metadata = item.metadataJson ? JSON.parse(item.metadataJson) : null;
+      } catch (error) {
+        metadata = null;
+      }
+
+      const hasEnvelope =
+        metadata &&
+        typeof metadata === "object" &&
+        (
+          Object.prototype.hasOwnProperty.call(metadata, "info") ||
+          Object.prototype.hasOwnProperty.call(metadata, "youtubeVideoId") ||
+          Object.prototype.hasOwnProperty.call(metadata, "originalUrl") ||
+          Object.prototype.hasOwnProperty.call(metadata, "cachedUrl")
+        );
+
+      const info = hasEnvelope ? (metadata.info || null) : metadata;
+      const originalUrl = hasEnvelope
+        ? (metadata.originalUrl || item.url)
+        : item.url;
+      const requestedBy = hasEnvelope
+        ? (metadata.requestedBy || item.requestedByTag || item.requestedById || "-")
+        : (item.requestedByTag || item.requestedById || "-");
+
+      return markYoutubeTrack({
+        url: item.url,
+        title: item.title,
+        requestedById: item.requestedById || null,
+        requestedByTag: item.requestedByTag || null,
+        requestedBy,
+        originalUrl,
+        cachedUrl: hasEnvelope ? (metadata.cachedUrl || null) : null,
+        youtubeVideoId: hasEnvelope ? (metadata.youtubeVideoId || null) : null,
+        source: hasEnvelope ? (metadata.source || null) : null,
+        info,
+      });
+    });
 
     return {
       queue,
       currentIndex: queueState.currentIndex,
       repeatMode: queueState.repeatMode || "off",
-      engine: queueState.engine || "ffmpeg",
+      engine: queueState.engine || "lavalink",
     };
   } catch (error) {
     logger.error("Failed loading queue state (Sequelize).", error);
@@ -344,6 +385,134 @@ async function loadUserQueueHistory(userId, guildId) {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Guild Playback History (Panel History)
+// -----------------------------------------------------------------------------
+async function saveGuildPlaybackHistory(guildId, history) {
+  if (!guildId || !Array.isArray(history)) return false;
+  try {
+    await GuildPlaybackHistory.upsert({
+      guildId,
+      historyJson: JSON.stringify(history),
+    });
+    return true;
+  } catch (error) {
+    logger.error("Failed saving guild playback history.", error);
+    return false;
+  }
+}
+
+async function loadGuildPlaybackHistory(guildId) {
+  if (!guildId) return [];
+  try {
+    const row = await GuildPlaybackHistory.findByPk(guildId);
+    if (!row) return [];
+    const parsed = JSON.parse(row.historyJson);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    logger.error("Failed loading guild playback history.", error);
+    return [];
+  }
+}
+
+async function loadAllGuildPlaybackHistories() {
+  try {
+    const rows = await GuildPlaybackHistory.findAll();
+    return rows.map((row) => {
+      let history = [];
+      try {
+        const parsed = JSON.parse(row.historyJson);
+        history = Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        history = [];
+      }
+      return {
+        guildId: row.guildId,
+        history,
+      };
+    });
+  } catch (error) {
+    logger.error("Failed loading all guild playback histories.", error);
+    return [];
+  }
+}
+
+// -----------------------------------------------------------------------------
+// ElevenLabs Usage
+// -----------------------------------------------------------------------------
+async function getElevenLabsUsage(usageMonth) {
+  if (!usageMonth) return null;
+  try {
+    const row = await ElevenLabsUsage.findByPk(usageMonth);
+    if (!row) {
+      return {
+        usageMonth,
+        characterCount: 0,
+        requestCount: 0,
+        lastUsedAt: null,
+      };
+    }
+    return {
+      usageMonth: row.usageMonth,
+      characterCount: Number(row.characterCount) || 0,
+      requestCount: Number(row.requestCount) || 0,
+      lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
+    };
+  } catch (error) {
+    logger.error("Failed loading ElevenLabs usage.", error);
+    return null;
+  }
+}
+
+async function addElevenLabsUsage(usageMonth, charCount) {
+  if (!usageMonth || !Number.isFinite(Number(charCount))) return null;
+  const delta = Math.max(0, Math.round(Number(charCount)));
+  try {
+    const [row] = await ElevenLabsUsage.findOrCreate({
+      where: { usageMonth },
+      defaults: {
+        usageMonth,
+        characterCount: 0,
+        requestCount: 0,
+      },
+    });
+    row.characterCount = Math.max(0, (Number(row.characterCount) || 0) + delta);
+    row.requestCount = Math.max(0, (Number(row.requestCount) || 0) + 1);
+    row.lastUsedAt = new Date();
+    await row.save();
+    return {
+      usageMonth: row.usageMonth,
+      characterCount: Number(row.characterCount) || 0,
+      requestCount: Number(row.requestCount) || 0,
+      lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
+    };
+  } catch (error) {
+    logger.error("Failed updating ElevenLabs usage.", error);
+    return null;
+  }
+}
+
+async function subtractElevenLabsUsage(usageMonth, charCount) {
+  if (!usageMonth || !Number.isFinite(Number(charCount))) return null;
+  const delta = Math.max(0, Math.round(Number(charCount)));
+  try {
+    const row = await ElevenLabsUsage.findByPk(usageMonth);
+    if (!row) return null;
+    row.characterCount = Math.max(0, (Number(row.characterCount) || 0) - delta);
+    row.requestCount = Math.max(0, (Number(row.requestCount) || 1) - 1);
+    await row.save();
+    return {
+      usageMonth: row.usageMonth,
+      characterCount: Number(row.characterCount) || 0,
+      requestCount: Number(row.requestCount) || 0,
+      lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
+    };
+  } catch (error) {
+    logger.error("Failed rolling back ElevenLabs usage.", error);
+    return null;
+  }
+}
+
 module.exports = {
   // ... existing exports ...
   initDatabase,
@@ -363,4 +532,10 @@ module.exports = {
   listUserMemory,
   saveUserQueueHistory,
   loadUserQueueHistory,
+  saveGuildPlaybackHistory,
+  loadGuildPlaybackHistory,
+  loadAllGuildPlaybackHistories,
+  getElevenLabsUsage,
+  addElevenLabsUsage,
+  subtractElevenLabsUsage,
 };

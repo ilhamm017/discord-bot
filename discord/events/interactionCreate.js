@@ -1,5 +1,7 @@
 const logger = require("../../utils/logger");
+const { getGuildState } = require("../player/voice");
 const {
+    enqueueTrack,
     getState,
     jumpToIndex,
     leaveVoice,
@@ -13,7 +15,15 @@ const {
 const { buildControlPanel, updateControlPanel } = require("../player/panel");
 const { getSearchSession, clearSearchSession } = require("../player/search");
 const { resolveSpotifyTrackToYoutube } = require("../../utils/common/spotify");
-const playerManager = require("../player/PlayerManager");
+const {
+    markYoutubeTrack,
+    primeMyInstantsTrack,
+    primeYoutubeTrack,
+} = require("../../utils/common/media_cache");
+const {
+    buildMyInstantsTrack,
+    resolveMyInstantsResult,
+} = require("../../utils/common/myinstants");
 
 module.exports = {
     name: "interactionCreate",
@@ -103,14 +113,15 @@ module.exports = {
 
             const action = interaction.customId.slice("music_".length);
             const guildId = interaction.guild.id;
-            const state = getState(guildId);
+            const canonicalState = getGuildState(guildId);
+            const state = canonicalState || getState(guildId);
 
             if (state) {
                 state.panelChannelId = interaction.channelId;
                 state.panelMessageId = interaction.message?.id || state.panelMessageId;
             }
 
-            const voiceRequired = !["refresh", "queue_prev", "queue_next"].includes(action);
+            const voiceRequired = !["refresh", "panel_prev", "panel_next", "history_toggle"].includes(action);
             if (voiceRequired) {
                 const voiceChannel = interaction.member?.voice?.channel;
                 if (!voiceChannel) {
@@ -128,7 +139,14 @@ module.exports = {
                 }
             }
 
-            if (action !== "refresh" && (!state || !Array.isArray(state.queue) || state.queue.length === 0)) {
+            const hasQueue = Boolean(state && Array.isArray(state.queue) && state.queue.length > 0);
+            const hasHistory = Boolean(state && Array.isArray(state.playHistory) && state.playHistory.length > 0);
+            const isHistoryOnlyAction =
+                action === "history_toggle" ||
+                (action === "panel_prev" && state?.panelView === "history") ||
+                (action === "panel_next" && state?.panelView === "history");
+
+            if (action !== "refresh" && !hasQueue && !(isHistoryOnlyAction && hasHistory)) {
                 return interaction.reply({
                     content: "Tidak ada musik yang sedang diputar.",
                     ephemeral: true,
@@ -139,6 +157,7 @@ module.exports = {
                 await interaction.deferUpdate();
 
                 let actionError = null;
+                let needsPostRefresh = false;
                 switch (action) {
                     case "prev":
                         if (!(await previousTrack(guildId))) actionError = "Tidak ada lagu sebelumnya.";
@@ -146,6 +165,7 @@ module.exports = {
                     case "pause": {
                         const res = await togglePause(guildId);
                         if (res.status === "idle") actionError = "Gagal pause/resume.";
+                        needsPostRefresh = true;
                         break;
                     }
                     case "next":
@@ -168,18 +188,27 @@ module.exports = {
                         break;
                     case "refresh":
                         break;
-                    case "queue_prev":
-                        state.queuePage = Math.max(0, (state.queuePage || 0) - 1);
+                    case "history_toggle":
+                        if (!Array.isArray(state?.playHistory) || state.playHistory.length === 0) {
+                            actionError = "History playback masih kosong.";
+                            break;
+                        }
+                        state.panelView = state.panelView === "history" ? "queue" : "history";
                         break;
-                    case "queue_next":
-                        state.queuePage = (state.queuePage || 0) + 1;
+                    case "panel_prev":
+                        if (state.panelView === "history") {
+                            state.historyPage = Math.max(0, (state.historyPage || 0) - 1);
+                        } else {
+                            state.queuePage = Math.max(0, (state.queuePage || 0) - 1);
+                        }
                         break;
-                    case "switch_engine": {
-                        const nextType = (await playerManager.getEngineType(guildId)) === "lavalink" ? "ffmpeg" : "lavalink";
-                        await playerManager.setEngine(guildId, nextType);
-                        if (state) state.engine = nextType;
+                    case "panel_next":
+                        if (state.panelView === "history") {
+                            state.historyPage = (state.historyPage || 0) + 1;
+                        } else {
+                            state.queuePage = (state.queuePage || 0) + 1;
+                        }
                         break;
-                    }
                     default:
                         actionError = "Kontrol tidak dikenal.";
                         break;
@@ -191,6 +220,13 @@ module.exports = {
 
                 const updatedState = getState(guildId);
                 await interaction.editReply(buildControlPanel(updatedState));
+                if (needsPostRefresh) {
+                    // Lavalink pause/resume can update flags a tick later;
+                    // force one additional refresh to keep play/pause button in sync.
+                    await new Promise((resolve) => setTimeout(resolve, 200));
+                    const latestState = getState(guildId);
+                    await updateControlPanel(client, latestState);
+                }
             } catch (error) {
                 logger.error("Control panel button failed.", error);
                 const payload = { content: "Terjadi error saat menjalankan kontrol.", ephemeral: true };
@@ -210,7 +246,15 @@ module.exports = {
                 const item = session.results[Number(interaction.values?.[0])];
                 if (!item) return interaction.reply({ content: "Hasil tidak ditemukan.", ephemeral: true });
 
-                const voiceChannel = interaction.member?.voice?.channel;
+                let voiceChannel = null;
+                if (session.voiceChannelId) {
+                    voiceChannel =
+                        interaction.guild.channels.cache.get(session.voiceChannelId) ||
+                        (await interaction.guild.channels.fetch(session.voiceChannelId).catch(() => null));
+                }
+                if (!voiceChannel) {
+                    voiceChannel = interaction.member?.voice?.channel || null;
+                }
                 if (!voiceChannel) return interaction.reply({ content: "Join voice dulu!", ephemeral: true });
 
                 try {
@@ -222,13 +266,23 @@ module.exports = {
                         if (!resolved?.url) {
                             return interaction.followUp({ content: "Gagal petakan Spotify.", ephemeral: true });
                         }
-                        track = {
+                        track = markYoutubeTrack({
                             ...resolved,
                             requestedBy: interaction.user.tag,
                             requestedById: interaction.member.id
-                        };
+                        }, {
+                            sourceUrl: resolved.originalUrl || resolved.url,
+                            youtubeVideoId: resolved.youtubeVideoId || null,
+                        });
+                    } else if (item.source === "myinstants") {
+                        const resolved = await resolveMyInstantsResult(item);
+                        track = buildMyInstantsTrack(resolved, {
+                            requestedBy: interaction.user.tag,
+                            requestedById: interaction.member.id,
+                            requestedByTag: interaction.user.tag,
+                        });
                     } else {
-                        track = {
+                        track = markYoutubeTrack({
                             url: item.url,
                             title: item.title,
                             requestedBy: interaction.user.tag,
@@ -240,7 +294,24 @@ module.exports = {
                                     thumbnails: item.thumbnail ? [{ url: item.thumbnail }] : []
                                 }
                             }
-                        };
+                        }, {
+                            sourceUrl: item.url,
+                            youtubeVideoId: item.videoId || null,
+                        });
+                    }
+
+                    if (track?.source === "youtube" || track?.source === "myinstants") {
+                        const primePromise = track?.source === "myinstants"
+                            ? primeMyInstantsTrack(track)
+                            : primeYoutubeTrack(track);
+                        primePromise?.catch((error) => {
+                            logger.debug("Background audio cache prime failed.", {
+                                source: track?.source || null,
+                                videoId: track?.youtubeVideoId || null,
+                                cacheKey: track?.cacheKey || null,
+                                message: error?.message || String(error),
+                            });
+                        });
                     }
 
                     const { enqueueTrack } = require("../player/queue");
@@ -281,6 +352,60 @@ module.exports = {
                 } catch (error) {
                     logger.error("Queue select failed.", error);
                     const payload = { content: "Terjadi error saat memilih antrian.", ephemeral: true };
+                    if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => { });
+                    else await interaction.reply(payload).catch(() => { });
+                }
+                return;
+            }
+
+            if (interaction.customId === "music_history_select") {
+                if (!interaction.guild) {
+                    return interaction.reply({ content: "Perintah ini hanya bisa di server.", ephemeral: true });
+                }
+
+                const guildId = interaction.guildId;
+                const state = getState(guildId);
+                const targetIndex = Number(interaction.values?.[0]);
+                const history = Array.isArray(state?.playHistory) ? state.playHistory : [];
+                const selectedTrack = history[targetIndex];
+
+                if (!selectedTrack) {
+                    return interaction.reply({ content: "Lagu history tidak ditemukan.", ephemeral: true });
+                }
+
+                const voiceChannel = interaction.member?.voice?.channel;
+                if (!voiceChannel) {
+                    return interaction.reply({ content: "Kamu harus join voice channel dulu.", ephemeral: true });
+                }
+                if (state?.channelId && voiceChannel.id !== state.channelId) {
+                    return interaction.reply({
+                        content: "Kamu harus berada di voice channel yang sama dengan bot.",
+                        ephemeral: true,
+                    });
+                }
+
+                try {
+                    await interaction.deferUpdate();
+                    const replayTrack = {
+                        ...selectedTrack,
+                        info: selectedTrack.info
+                            ? JSON.parse(JSON.stringify(selectedTrack.info))
+                            : null,
+                    };
+                    const result = await enqueueTrack(voiceChannel, replayTrack, {
+                        textChannelId: interaction.channelId,
+                    });
+                    const updatedState = getState(guildId);
+                    await interaction.editReply(buildControlPanel(updatedState));
+                    await interaction.followUp({
+                        content: result.started
+                            ? `Memutar lagi: ${replayTrack.title}`
+                            : `Ditambahkan dari history ke antrian: ${replayTrack.title}`,
+                        ephemeral: true,
+                    }).catch(() => { });
+                } catch (error) {
+                    logger.error("History select failed.", error);
+                    const payload = { content: "Terjadi error saat memilih lagu history.", ephemeral: true };
                     if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => { });
                     else await interaction.reply(payload).catch(() => { });
                 }

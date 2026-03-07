@@ -1,5 +1,5 @@
 // functions/tools/ai/message_generation.js
-const { chatCompletion } = require("../../ai/completion");
+const { chatCompletion } = require("../../../ai/completion");
 
 function sanitizeMessage(text) {
     if (!text) return "";

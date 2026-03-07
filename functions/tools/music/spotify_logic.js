@@ -15,6 +15,8 @@ async function resolveSpotify(spotifyRef) {
         url: item.url,
         title: item.title || item.url,
         source: "spotify",
+        youtubeVideoId: item.youtubeVideoId || null,
+        originalUrl: item.originalUrl || item.url,
     }));
 
     return {

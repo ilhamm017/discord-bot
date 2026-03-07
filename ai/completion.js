@@ -1,4 +1,4 @@
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 const { analyzeComplexity } = require("./complexity_analyzer");
 const { selectModel, markRateLimited } = require("./model_selector");
 const { convertToolsToTextDescription } = require("./tools_to_text");
@@ -10,18 +10,22 @@ const DEFAULT_TIER = "balanced";
 function getConfig() {
     let config = {};
     try {
-        config = require("../../config.json");
+        config = require("../config.json");
     } catch (error) {
         config = {};
     }
 
-    // PRIORITIZE GOOGLE_API_KEY
-    const apiKey =
+    const googleApiKey =
         config.google_api_key ||
         config.googleApiKey ||
         process.env.GOOGLE_API_KEY;
 
-    return { apiKey, config };
+    const groqApiKey =
+        config.groq_api_key ||
+        config.groqApiKey ||
+        process.env.GROQ_API_KEY;
+
+    return { googleApiKey, groqApiKey, config };
 }
 
 /**
@@ -262,9 +266,11 @@ async function chatCompletion({
     temperature = 0.7,
     maxTokens = 250,
 }, options = {}) {
-    const { apiKey, config } = getConfig();
-    if (!apiKey) {
-        throw new Error("GOOGLE_API_KEY_MISSING: Please add google_api_key to config.json");
+    const { googleApiKey, groqApiKey, config } = getConfig();
+    const hasGoogleKey = Boolean(googleApiKey);
+    const hasGroqKey = Boolean(groqApiKey);
+    if (!hasGoogleKey && !hasGroqKey) {
+        throw new Error("AI_API_KEY_MISSING: Please add google_api_key or groq_api_key to config.json");
     }
 
     // Prepare Payload
@@ -283,7 +289,17 @@ async function chatCompletion({
     const { contents, systemInstruction } = convertMessagesToGoogleFormat(inputMessages, system);
 
     // Analyze complexity based on the CURRENT message only
-    const { tier, provider: preferredProvider, intent, needsHistory, needsMentions, needsTool, isReplyingToQuestion } = analyzeComplexity(currentUserMessage, {
+    const {
+        tier,
+        provider: analyzerProvider,
+        intent,
+        needsHistory,
+        needsMentions,
+        needsTool,
+        isReplyingToQuestion,
+        isAmbiguous,
+        routingConfidence,
+    } = analyzeComplexity(currentUserMessage, {
         messages: inputMessages,
         tools: options.tools,
         isReply: options.isReply
@@ -340,34 +356,82 @@ async function chatCompletion({
 
     let filteredMessages = inputMessages;
     if (!needsHistory) {
-        // For general chat, keep a bit more history (e.g., last 5 messages) for natural flow
-        // For tool-tasks, last 2 is usually enough.
+        // Backward-compatible default: keep small tail when history is optional.
         let historySize = intent === 'general' ? 6 : 2;
+        const historyOnlyWhenNeeded = config.ai_history_only_when_needed !== false;
 
         // FRESH START LOGIC: Truly random chat (no reply, no history mention, no bot question pending)
         // Also check if context is "stale" (e.g. more than 15 minutes old)
         const STALE_THRESHOLD_MS = 15 * 60 * 1000;
-        const lastRelevantMsg = inputMessages.filter(m => m.role !== 'system').slice(-1)[0];
+        const nonSystemMessages = inputMessages.filter(m => m.role !== 'system');
+        const lastRelevantMsg = nonSystemMessages.slice(-1)[0];
         const isStale = lastRelevantMsg?.timestamp && (Date.now() - lastRelevantMsg.timestamp > STALE_THRESHOLD_MS);
 
-        if (!options.isReply && !needsHistory && !isReplyingToQuestion && (isStale || intent === 'general')) {
-            historySize = 0; // Completely fresh start
+        if (historyOnlyWhenNeeded && !options.isReply) {
+            historySize = 0;
+            logger.debug("History policy active (ai_history_only_when_needed=true). Non-required history cleared.");
+        } else if (!options.isReply && !isReplyingToQuestion && (isStale || intent === 'general')) {
+            historySize = 0;
             logger.debug(`Fresh start detected (isStale: ${!!isStale}). History cleared.`);
         }
 
         const systemMsg = inputMessages.find(m => m.role === 'system');
-        const tail = inputMessages.filter(m => m.role !== 'system').slice(-historySize);
+        // NOTE: When history is cleared, we still must keep the active turn context.
+        // Keep messages from the latest user message onward (user + tool chain, if any).
+        let tail;
+        if (historySize > 0) {
+            tail = nonSystemMessages.slice(-historySize);
+        } else {
+            const lastUserIndex = nonSystemMessages.map(m => m.role).lastIndexOf("user");
+            tail = lastUserIndex >= 0
+                ? nonSystemMessages.slice(lastUserIndex)
+                : nonSystemMessages.slice(-1);
+        }
         filteredMessages = systemMsg ? [systemMsg, ...tail] : tail;
         logger.debug(`History pruned (intent: ${intent}, size: ${historySize}). Kept ${filteredMessages.length} messages.`);
     }
 
     // New Tool Pruning Logic: Drastically reduces prompt bloat and latency
-    const filteredTools = (needsTool && Array.isArray(options.tools)) ? filterToolsByIntent(intent, options.tools) : undefined;
-    if (filteredTools) {
-        logger.info(`Contextual Tool Pruning: Reduced toolset for intent "${intent}" (${filteredTools.length} tools kept).`);
+    let filteredTools;
+    if (needsTool && Array.isArray(options.tools)) {
+        if (isAmbiguous || routingConfidence < 0.65) {
+            filteredTools = options.tools;
+            logger.info(
+                `Contextual Tool Pruning bypassed (ambiguous=${!!isAmbiguous}, confidence=${Number(routingConfidence || 0).toFixed(2)}). ` +
+                `Keeping full toolset (${filteredTools.length} tools).`
+            );
+        } else {
+            filteredTools = filterToolsByIntent(intent, options.tools);
+            if (filteredTools) {
+                logger.info(`Contextual Tool Pruning: Reduced toolset for intent "${intent}" (${filteredTools.length} tools kept).`);
+            } else {
+                logger.info(`Contextual Tool Pruning: No tools kept for intent "${intent}" (needsTool: ${needsTool}).`);
+            }
+        }
     } else {
+        filteredTools = undefined;
         logger.info(`Contextual Tool Pruning: No tools kept for intent "${intent}" (needsTool: ${needsTool}).`);
     }
+
+    // Provider policy:
+    // - Normal conversation -> Google
+    // - Tool execution path -> Groq
+    const isToolExecutionRequest = Array.isArray(filteredTools) && filteredTools.length > 0;
+    const policyPreferredProvider = isToolExecutionRequest ? "groq" : "google";
+    let effectivePreferredProvider = policyPreferredProvider;
+
+    if (effectivePreferredProvider === "groq" && !hasGroqKey && hasGoogleKey) {
+        logger.warn("Tool path selected Groq, but GROQ API key is missing. Falling back to Google.");
+        effectivePreferredProvider = "google";
+    } else if (effectivePreferredProvider === "google" && !hasGoogleKey && hasGroqKey) {
+        logger.warn("Conversation path selected Google, but Google API key is missing. Falling back to Groq.");
+        effectivePreferredProvider = "groq";
+    }
+
+    logger.info(
+        `Provider routing: analyzer=${analyzerProvider}, policy=${policyPreferredProvider}, ` +
+        `effective=${effectivePreferredProvider}, toolExecution=${isToolExecutionRequest}`
+    );
 
     // Re-generate Google format with filtered messages
     const { contents: filteredContents, systemInstruction: filteredSystem } = convertMessagesToGoogleFormat(filteredMessages, system);
@@ -380,6 +444,10 @@ async function chatCompletion({
 
     // Strategy Function for Google AI
     const runGoogleAttempt = async (currentRequestId) => {
+        if (!hasGoogleKey) {
+            throw new Error("GOOGLE_API_KEY_MISSING: Google provider is unavailable.");
+        }
+
         let currentTier = tier;
         let lastError = null;
         const maxAttempts = 4;
@@ -391,7 +459,7 @@ async function chatCompletion({
 
             if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
 
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${googleApiKey}`;
             const isGemmaModel = currentModel.toLowerCase().includes('gemma');
             const body = {
                 contents: filteredContents, // Use filtered contents
@@ -499,6 +567,10 @@ async function chatCompletion({
 
     // Strategy Function for Groq AI
     const runGroqAttempt = async () => {
+        if (!hasGroqKey) {
+            throw new Error("GROQ_API_KEY_MISSING: Groq provider is unavailable.");
+        }
+
         let groqTier = tier;
         const groqAttempts = 3;
         const groqVisited = new Set();
@@ -529,7 +601,7 @@ async function chatCompletion({
             }
 
             try {
-                const response = await callGroqAI(config.groq_api_key, groqModel, {
+                const response = await callGroqAI(groqApiKey, groqModel, {
                     system, user,
                     messages: groqMessages,
                     temperature: finalTemperature, maxTokens,
@@ -538,10 +610,25 @@ async function chatCompletion({
 
                 // ADDITIONAL SAFETY: Verify Groq didn't hallucinate a tool NOT in the provided list
                 if (response && response.tool_calls) {
-                    const validToolNames = new Set(filteredTools.map(t => t.function?.name || t.name));
-                    const hasInvalid = response.tool_calls.some(tc => !validToolNames.has(tc.function.name));
-                    if (hasInvalid) {
-                        logger.error(`Groq ${groqModel} hallucinated an invalid tool call. Invalid tools: ${response.tool_calls.filter(tc => !validToolNames.has(tc.function.name)).map(tc => tc.function.name).join(", ")}`);
+                    const availableTools = Array.isArray(filteredTools) ? filteredTools : [];
+                    if (availableTools.length === 0) {
+                        logger.error(`Groq ${groqModel} returned tool_calls but no tools were provided.`);
+                        throw new Error(`Unexpected tool calls from Groq response for ${groqModel}.`);
+                    }
+
+                    const validToolNames = new Set(
+                        availableTools.map(t => t.function?.name || t.name).filter(Boolean)
+                    );
+                    const invalidCalls = response.tool_calls.filter(tc => {
+                        const toolName = tc?.function?.name;
+                        return !toolName || !validToolNames.has(toolName);
+                    });
+
+                    if (invalidCalls.length > 0) {
+                        logger.error(
+                            `Groq ${groqModel} hallucinated an invalid tool call. Invalid tools: ` +
+                            `${invalidCalls.map(tc => tc?.function?.name || "<missing>").join(", ")}`
+                        );
                         throw new Error(`Invalid tool call detected in Groq response for ${groqModel}.`);
                     }
                 }
@@ -568,25 +655,28 @@ async function chatCompletion({
     };
 
     return rateLimiter.executeRequest(async (requestId) => {
-        if (preferredProvider === 'groq' && config.groq_api_key) {
+        if (effectivePreferredProvider === 'groq') {
             try {
                 return await runGroqAttempt();
             } catch (e) {
-                logger.warn("Preferred Groq failed, falling back to Google...");
-                return await runGoogleAttempt(requestId);
+                if (hasGoogleKey) {
+                    logger.warn("Preferred Groq failed, falling back to Google...");
+                    return await runGoogleAttempt(requestId);
+                }
+                throw e;
             }
         } else {
             try {
                 return await runGoogleAttempt(requestId);
             } catch (e) {
-                if (config.groq_api_key) {
+                if (hasGroqKey) {
                     logger.warn("Preferred Google failed, falling back to Groq...");
                     return await runGroqAttempt();
                 }
                 throw e;
             }
         }
-    }, { system, user, messages: filteredMessages, maxTokens, tools: needsTool ? options.tools : undefined });
+    }, { system, user, messages: filteredMessages, maxTokens, tools: filteredTools });
 }
 
 // Keep helper functions getNextFallbackTier etc as they were

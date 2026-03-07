@@ -1,5 +1,5 @@
 const logger = require("../../../utils/logger");
-const { chatCompletion } = require("../../../functions/ai/completion");
+const { chatCompletion } = require("../../../ai/completion");
 const { waitWithTyping } = require("../../../utils/common/typing");
 let config = {};
 

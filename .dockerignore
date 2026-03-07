@@ -1,0 +1,14 @@
+.git
+.gitignore
+node_modules
+logs
+.data
+database.sqlite
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+config.backup.*.json
+lavalink/logs
+lavalink/lavalink_server.log
+lavalink/application.backup.*.yml
+.DS_Store

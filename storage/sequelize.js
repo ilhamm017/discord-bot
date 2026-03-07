@@ -23,12 +23,21 @@ const connectDB = async () => {
 
         // Ensure audio_engine column exists (SQLite alter: true is fragile)
         try {
-            await sequelize.query("ALTER TABLE Guilds ADD COLUMN audio_engine TEXT DEFAULT 'ffmpeg'");
+            await sequelize.query("ALTER TABLE Guilds ADD COLUMN audio_engine TEXT DEFAULT 'lavalink'");
             logger.info("Added audio_engine column to Guilds table.");
         } catch (error) {
             if (!error.message.includes("duplicate column name")) {
                 logger.debug("Column audio_engine already exists or other error:", error.message);
             }
+        }
+
+        try {
+            await sequelize.query(
+                "UPDATE Guilds SET audio_engine = 'lavalink' " +
+                "WHERE audio_engine IS NULL OR audio_engine <> 'lavalink'"
+            );
+        } catch (error) {
+            logger.debug("Failed normalizing Guilds.audio_engine values:", error.message);
         }
 
         try {
@@ -38,6 +47,15 @@ const connectDB = async () => {
             if (!error.message.includes("duplicate column name")) {
                 logger.debug("Column metadataJson already exists or other error:", error.message);
             }
+        }
+
+        try {
+            await sequelize.query(
+                "UPDATE QueueStates SET engine = 'lavalink' " +
+                "WHERE engine IS NULL OR engine <> 'lavalink'"
+            );
+        } catch (error) {
+            logger.debug("Failed normalizing QueueStates.engine values:", error.message);
         }
 
         logger.info("Database models synchronized.");
