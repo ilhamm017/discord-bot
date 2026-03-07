@@ -13,6 +13,8 @@ services:
       CONFIG_WEB_HOST: 0.0.0.0
       CONFIG_WEB_PORT: 3210
       CONFIG_WEB_TOKEN: ${CONFIG_WEB_TOKEN:-}
+      CONFIG_BACKUP_DIR: /app/.data/config-backups
+      LAVALINK_CONFIG_BACKUP_DIR: /app/.data/lavalink-config-backups
       AUDIO_CACHE_HOST: 127.0.0.1
       AUDIO_CACHE_PORT: 3211
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
@@ -24,8 +26,12 @@ services:
     ports:
       - "3210:3210"
     volumes:
-      - .:/app
-      - yova_node_modules:/app/node_modules
+      - ./config.json:/app/config.json
+      - ./database.sqlite:/app/database.sqlite
+      - ./.data:/app/.data
+      - ./logs:/app/logs
+      - ./lavalink/application.yml:/app/lavalink/application.yml
+      - ./lavalink/logs:/app/lavalink/logs
     healthcheck:
       test:
         [
@@ -39,6 +45,3 @@ services:
       retries: 3
       start_period: 25s
     stop_grace_period: 30s
-
-volumes:
-  yova_node_modules:

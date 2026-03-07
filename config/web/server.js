@@ -8,6 +8,9 @@ const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const CONFIG_PATH = path.join(ROOT_DIR, "config.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATA_DIR = path.join(ROOT_DIR, ".data");
+const CONFIG_BACKUP_DIR = process.env.CONFIG_BACKUP_DIR
+    ? path.resolve(ROOT_DIR, process.env.CONFIG_BACKUP_DIR)
+    : ROOT_DIR;
 const COOKIE_UPLOAD_PATH = path.join(DATA_DIR, "cookies.txt");
 const {
     readManagedLavalinkConfig,
@@ -58,7 +61,8 @@ function writeConfig(nextConfig) {
     assertSafeObject(nextConfig);
 
     const backupName = `config.backup.${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-    const backupPath = path.join(ROOT_DIR, backupName);
+    fs.mkdirSync(CONFIG_BACKUP_DIR, { recursive: true });
+    const backupPath = path.join(CONFIG_BACKUP_DIR, backupName);
     fs.copyFileSync(CONFIG_PATH, backupPath);
 
     const payload = `${JSON.stringify(nextConfig, null, 2)}\n`;

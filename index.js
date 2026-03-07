@@ -20,7 +20,8 @@ async function main() {
     // 2. Start Lavalink (Infrastructure for premium audio)
     const { spawn, execSync } = require("child_process");
     const lavalinkPath = path.join(__dirname, "lavalink", "Lavalink.jar");
-    const jrePath = path.join(__dirname, "lavalink", "jre", "bin", "java");
+    const localJavaPath = path.join(__dirname, "lavalink", "jre", "bin", "java");
+    const javaBin = process.env.JAVA_BIN || (fs.existsSync(localJavaPath) ? localJavaPath : "java");
 
     // CRITICAL: Clean up existing Lavalink process on the same port
     try {
@@ -32,9 +33,10 @@ async function main() {
 
     logger.info("Starting Lavalink server...");
     startMediaCacheServer();
-    const logPath = path.join(__dirname, "lavalink", "lavalink_server.log");
+    const logPath = path.join(__dirname, "lavalink", "logs", "lavalink_server.log");
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
     const out = fs.openSync(logPath, "a");
-    const lavalinkProcess = spawn(jrePath, ["-jar", lavalinkPath], {
+    const lavalinkProcess = spawn(javaBin, ["-jar", lavalinkPath], {
       cwd: path.join(__dirname, "lavalink"),
       stdio: ["ignore", out, out],
       detached: false

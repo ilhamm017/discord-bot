@@ -5,6 +5,9 @@ const path = require("path");
 
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const LAVALINK_CONFIG_PATH = path.join(ROOT_DIR, "lavalink", "application.yml");
+const LAVALINK_CONFIG_BACKUP_DIR = process.env.LAVALINK_CONFIG_BACKUP_DIR
+    ? path.resolve(ROOT_DIR, process.env.LAVALINK_CONFIG_BACKUP_DIR)
+    : path.dirname(LAVALINK_CONFIG_PATH);
 
 const MANAGED_LAVALINK_FIELDS = [
     {
@@ -250,7 +253,8 @@ function writeManagedLavalinkConfig(nextConfig) {
     const updatedYaml = updateManagedLavalinkYaml(currentYaml, nextConfig);
 
     const backupName = `application.backup.${new Date().toISOString().replace(/[:.]/g, "-")}.yml`;
-    const backupPath = path.join(path.dirname(LAVALINK_CONFIG_PATH), backupName);
+    fs.mkdirSync(LAVALINK_CONFIG_BACKUP_DIR, { recursive: true });
+    const backupPath = path.join(LAVALINK_CONFIG_BACKUP_DIR, backupName);
     fs.copyFileSync(LAVALINK_CONFIG_PATH, backupPath);
     fs.writeFileSync(LAVALINK_CONFIG_PATH, updatedYaml, "utf8");
 

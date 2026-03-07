@@ -3,11 +3,13 @@
 Komponen server Lavalink untuk audio streaming musik.
 
 ## Isi Utama
-- `Lavalink.jar`: binary server Lavalink.
 - `application.yml`: konfigurasi server Lavalink.
-- `plugins/`: plugin Lavalink (mis. YouTube plugin).
-- `jre/`: runtime Java lokal untuk menjalankan Lavalink.
 - `logs/`, `lavalink_server.log`: log proses Lavalink.
+
+Catatan:
+- Binary `Lavalink.jar`, plugin, dan Java runtime tidak perlu disimpan di Git.
+- Untuk deployment Docker, binary Lavalink diunduh saat image build.
+- Untuk runtime non-Docker, aplikasi akan memakai Java sistem jika `lavalink/jre/bin/java` tidak ada.
 
 ## Aturan
 - Ubah `application.yml` saat perlu tuning koneksi/audio.

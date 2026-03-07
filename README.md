@@ -52,7 +52,18 @@ Repo ini sudah punya `docker-compose.yml` untuk menjalankan:
 - panel web config di `http://127.0.0.1:3210`
 - Lavalink internal yang memang otomatis dinyalakan oleh `index.js`
 
-Jalankan:
+1. Pastikan `config.json` sudah berisi token bot dan konfigurasi dasar.
+2. Opsional: set env penting sebelum start:
+
+```bash
+export CONFIG_WEB_TOKEN=rahasia-panel
+export GOOGLE_API_KEY=...
+export GROQ_API_KEY=...
+export SPOTIFY_CLIENT_ID=...
+export SPOTIFY_CLIENT_SECRET=...
+```
+
+3. Build dan jalankan:
 
 ```bash
 docker compose up -d --build
@@ -60,10 +71,26 @@ docker compose up -d --build
 
 Catatan:
 - Compose ini memakai satu container aplikasi agar tombol restart Lavalink dari panel web tetap berfungsi.
-- Source repo di-mount ke container, jadi perubahan `config.json` dan `lavalink/application.yml` dari panel akan langsung tersimpan ke file lokal.
+- Binary Lavalink dan Java tidak lagi perlu disimpan di repo; image Docker akan mengunduh Lavalink saat build dan memakai Java dari image.
+- Compose hanya bind-mount file runtime penting seperti `config.json`, `.data/`, `database.sqlite`, log, dan `lavalink/application.yml`, jadi binary Lavalink bawaan image tidak ketimpa mount host.
 - Jika ingin mengunci panel web, set env `CONFIG_WEB_TOKEN` sebelum menjalankan compose.
+- Setelah ada perubahan kode bot, rebuild image dengan `docker compose up -d --build`.
 
-Untuk melihat log:
+Perintah operasional:
+
+```bash
+docker compose logs -f yova
+docker compose restart yova
+docker compose down
+docker compose up -d --build
+```
+
+Setelah container aktif:
+- bot akan berjalan otomatis
+- panel config bisa dibuka di `http://127.0.0.1:3210`
+- jika `CONFIG_WEB_TOKEN` aktif, kirim header `x-config-token` dari browser client / request yang kamu pakai
+
+Untuk melihat log realtime:
 
 ```bash
 docker compose logs -f yova

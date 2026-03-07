@@ -8,10 +8,20 @@ const { spawn, execSync } = require("child_process");
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const LAVALINK_DIR = path.join(ROOT_DIR, "lavalink");
 const LAVALINK_JAR_PATH = path.join(LAVALINK_DIR, "Lavalink.jar");
-const LAVALINK_JRE_PATH = path.join(LAVALINK_DIR, "jre", "bin", "java");
-const LAVALINK_LOG_PATH = path.join(LAVALINK_DIR, "lavalink_server.log");
+const LAVALINK_LOG_PATH = path.join(LAVALINK_DIR, "logs", "lavalink_server.log");
 const LAVALINK_HOST = "127.0.0.1";
 const LAVALINK_PORT = 2333;
+
+function resolveJavaBin() {
+    const localJavaPath = path.join(LAVALINK_DIR, "jre", "bin", "java");
+    if (process.env.JAVA_BIN) {
+        return process.env.JAVA_BIN;
+    }
+    if (fs.existsSync(localJavaPath)) {
+        return localJavaPath;
+    }
+    return "java";
+}
 
 function isLavalinkReachable(timeoutMs = 500) {
     return new Promise((resolve) => {
@@ -58,15 +68,12 @@ async function restartLavalinkProcess() {
     if (!fs.existsSync(LAVALINK_JAR_PATH)) {
         throw new Error("Lavalink.jar tidak ditemukan.");
     }
-    if (!fs.existsSync(LAVALINK_JRE_PATH)) {
-        throw new Error("Binary java Lavalink tidak ditemukan.");
-    }
 
     killLavalinkPort();
 
     fs.mkdirSync(LAVALINK_DIR, { recursive: true });
     const out = fs.openSync(LAVALINK_LOG_PATH, "a");
-    const child = spawn(LAVALINK_JRE_PATH, ["-jar", LAVALINK_JAR_PATH], {
+    const child = spawn(resolveJavaBin(), ["-jar", LAVALINK_JAR_PATH], {
         cwd: LAVALINK_DIR,
         stdio: ["ignore", out, out],
         detached: true,

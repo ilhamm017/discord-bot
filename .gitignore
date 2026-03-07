@@ -1,5 +1,5 @@
 node_modules/
-logs/
+/logs/
 .data/
 
 config.json
@@ -11,7 +11,11 @@ database.sqlite
 *.sqlite-wal
 
 lavalink/lavalink_server.log
+lavalink/logs/*.log
 lavalink/Lavalink.jar.bak-*
 lavalink/application.backup.*.yml
+lavalink/Lavalink.jar
+lavalink/jre/
+lavalink/plugins/*.jar
 
 .DS_Store
