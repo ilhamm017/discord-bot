@@ -68,8 +68,13 @@ const logger = winston.createLogger({
   ],
 });
 
-// Jika bukan production (atau saat development), log juga ke console
-if (process.env.NODE_ENV !== "production") {
+const shouldLogToConsole =
+  process.env.LOG_TO_STDOUT === "1" ||
+  process.env.LOG_TO_STDOUT === "true" ||
+  process.env.NODE_ENV !== "production";
+
+// Di Docker production kita tetap bisa paksa log ke stdout lewat LOG_TO_STDOUT.
+if (shouldLogToConsole) {
   logger.add(
     new winston.transports.Console({
       format: consoleFormat,
