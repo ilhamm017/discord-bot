@@ -172,18 +172,22 @@ class LavalinkDriver {
             }
         }
 
+        if (track?.youtubeVideoId) {
+            try {
+                await primeYoutubeTrack(track);
+            } catch (error) {
+                logger.warn("YouTube local audio cache prime failed; falling back to source URL.", {
+                    title: track?.title || null,
+                    url: track?.originalUrl || track?.url || null,
+                    videoId: track?.youtubeVideoId || null,
+                    message: error?.message || String(error),
+                });
+            }
+        }
+
         const cachedPlaybackUrl = getPlaybackUrlForTrack(track);
         const query = cachedPlaybackUrl || track.url || track.title;
         const originalQuery = track.originalUrl || track.originUrl || track.url || track.title;
-
-        if (track?.youtubeVideoId && !cachedPlaybackUrl) {
-            primeYoutubeTrack(track)?.catch((error) => {
-                logger.debug("Background audio cache prime failed.", {
-                    videoId: track.youtubeVideoId,
-                    message: error?.message || String(error),
-                });
-            });
-        }
         logger.debug(`Lavalink Search Query: "${query}"`);
 
         let searchResult = await player.search({ query });

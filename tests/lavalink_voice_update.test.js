@@ -334,13 +334,111 @@ async function testWatchdogRepeatsSingleTrackMode() {
   }
 }
 
+async function testDriverUsesYoutubeCacheAfterPriming() {
+  const mediaCache = require("../utils/common/media_cache");
+  const driverPath = require.resolve("../discord/player/drivers/LavalinkDriver");
+  const originalGetPlaybackUrlForTrack = mediaCache.getPlaybackUrlForTrack;
+  const originalPrimeYoutubeTrack = mediaCache.primeYoutubeTrack;
+  const originalCachedDriver = require.cache[driverPath];
+
+  delete require.cache[driverPath];
+
+  let primed = false;
+  mediaCache.primeYoutubeTrack = async () => {
+    primed = true;
+    return "/tmp/cache.webm";
+  };
+  mediaCache.getPlaybackUrlForTrack = () => {
+    return primed ? "http://127.0.0.1:8765/audio-cache/yt-cache" : null;
+  };
+
+  const freshDriver = require("../discord/player/drivers/LavalinkDriver");
+  const originalWaitForConnected = freshDriver.waitForConnected;
+  const originalWaitForSessionId = freshDriver.waitForSessionId;
+
+  try {
+    const guildId = "guild-driver-cache";
+    const track = {
+      title: "Track Cache",
+      url: "https://www.youtube.com/watch?v=SA5zQB7FIgg",
+      originalUrl: "https://www.youtube.com/watch?v=SA5zQB7FIgg",
+      youtubeVideoId: "SA5zQB7FIgg",
+    };
+    const voiceChannel = { id: "voice-cache" };
+    let searchQuery = null;
+
+    const player = {
+      guildId,
+      connected: true,
+      playing: false,
+      paused: false,
+      voiceChannelId: "voice-cache",
+      options: { voiceChannelId: "voice-cache" },
+      voice: { sessionId: "session-cache" },
+      queue: { tracks: [], current: null },
+      async search({ query }) {
+        searchQuery = query;
+        return {
+          loadType: "track",
+          tracks: [{
+            info: {
+              title: "Track Cache",
+              uri: query,
+            },
+            userData: {},
+          }],
+        };
+      },
+      async connect() {},
+      async changeVoiceState() {},
+      async destroy() {},
+      async play() {
+        player.playCalled = (player.playCalled || 0) + 1;
+      },
+      async setVolume() {
+        player.volumeSet = true;
+      },
+      async resume() {},
+    };
+
+    const manager = {
+      players: new Map([[guildId, player]]),
+      nodeManager: {
+        nodes: new Map([["local", { connected: true }]]),
+      },
+    };
+
+    resetService();
+    lavalinkService.manager = manager;
+    freshDriver.waitForConnected = async () => true;
+    freshDriver.waitForSessionId = async () => "session-cache";
+
+    const result = await freshDriver.play(guildId, voiceChannel, track);
+
+    assert.strictEqual(result, track);
+    assert.strictEqual(searchQuery, "http://127.0.0.1:8765/audio-cache/yt-cache");
+    assert.strictEqual(player.playCalled, 1);
+    assert.strictEqual(player.volumeSet, true);
+  } finally {
+    mediaCache.getPlaybackUrlForTrack = originalGetPlaybackUrlForTrack;
+    mediaCache.primeYoutubeTrack = originalPrimeYoutubeTrack;
+    freshDriver.waitForConnected = originalWaitForConnected;
+    freshDriver.waitForSessionId = originalWaitForSessionId;
+    delete require.cache[driverPath];
+    if (originalCachedDriver) {
+      require.cache[driverPath] = originalCachedDriver;
+    }
+  }
+}
+
 (async () => {
   await runCase("manual voice patch waits for session and dedupes repeated payloads", testManualVoicePatchWaitsForSession);
   await runCase("legacy Lavalink nodes keep original voice flow", testLegacyNodeKeepsOriginalVoiceFlow);
   await runCase("reconnect and move handlers update diagnostics", testReconnectDiagnosticsHandlers);
   await runCase("driver recreates a stale player once before playback", testDriverRecreatesStalePlayerOnce);
   await runCase("watchdog replays current track when repeat-track mode is enabled", testWatchdogRepeatsSingleTrackMode);
-  console.log("\nLavalink playback regression passed (5/5)");
+  await runCase("driver uses YouTube cache URL after priming before Lavalink search", testDriverUsesYoutubeCacheAfterPriming);
+  console.log("\nLavalink playback regression passed (6/6)");
 })().catch((error) => {
   console.error(error);
   process.exit(1);
