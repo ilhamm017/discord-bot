@@ -8,6 +8,7 @@ const YTDlpWrap = require("yt-dlp-wrap").default;
 const dataDir = path.join(process.cwd(), ".data");
 const binaryName = os.platform() === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const binaryPath = path.join(dataDir, binaryName);
+const tempDir = path.join(dataDir, "tmp");
 let binaryRefreshAttempted = false;
 
 let config = {};
@@ -52,6 +53,42 @@ function appendYoutubeExtractorArgs(args, url) {
     return args;
 }
 
+function appendYoutubeJsRuntimeArgs(args, url) {
+    if (!isYoutubeUrl(url)) return args;
+    args.push("--js-runtimes", `node:${process.execPath}`);
+    return args;
+}
+
+function buildRuntimeCookiesPath(sourcePath) {
+    fs.mkdirSync(tempDir, { recursive: true });
+    const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return path.join(tempDir, `cookies-${suffix}.txt`);
+}
+
+function prepareCookiesArgs(args) {
+    const cookiesPath = getCookiesPath();
+    if (!cookiesPath) {
+        return {
+            args,
+            cleanup: () => { },
+        };
+    }
+
+    const runtimeCookiesPath = buildRuntimeCookiesPath(cookiesPath);
+    fs.copyFileSync(cookiesPath, runtimeCookiesPath);
+
+    return {
+        args: [...args, "--cookies", runtimeCookiesPath],
+        cleanup: () => {
+            try {
+                fs.unlinkSync(runtimeCookiesPath);
+            } catch (error) {
+                // Ignore temp cleanup failures.
+            }
+        },
+    };
+}
+
 async function downloadBinary(force = false) {
     fs.mkdirSync(dataDir, { recursive: true });
     try {
@@ -81,7 +118,7 @@ async function refreshBinary() {
 
 async function streamWithYtDlp(url) {
     const binary = await ensureBinary();
-    const args = appendYoutubeExtractorArgs(appendCookiesArg([
+    const baseArgs = appendYoutubeJsRuntimeArgs(appendYoutubeExtractorArgs([
         url,
         "--no-playlist",
         "--no-warnings",
@@ -99,6 +136,7 @@ async function streamWithYtDlp(url) {
         "-o",
         "-",
     ]), url);
+    const { args, cleanup } = prepareCookiesArgs(baseArgs);
 
     try {
         const stream = new PassThrough({ highWaterMark: 10 * 1024 * 1024 }); // 10MB Buffer
@@ -130,6 +168,7 @@ async function streamWithYtDlp(url) {
         });
 
         stream.on("close", () => {
+            cleanup();
             if (!child.killed) {
                 child.kill();
             }
@@ -137,6 +176,7 @@ async function streamWithYtDlp(url) {
 
         return stream;
     } catch (error) {
+        cleanup();
         const wrapped = new Error("YTDLP_EXEC_FAILED");
         wrapped.cause = error;
         throw wrapped;
@@ -147,7 +187,7 @@ async function searchWithYtDlp(query, limit = 5) {
     if (!query) return [];
     const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 25));
     const binary = await ensureBinary();
-    const args = appendCookiesArg([
+    const baseArgs = [
         `ytsearch${safeLimit}:${query}`,
         "--no-playlist",
         "--skip-download",
@@ -156,7 +196,8 @@ async function searchWithYtDlp(query, limit = 5) {
         "--no-warnings",
         "--no-progress",
         "-q",
-    ]);
+    ];
+    const { args, cleanup } = prepareCookiesArgs(baseArgs);
 
     return new Promise((resolve, reject) => {
         const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -172,10 +213,12 @@ async function searchWithYtDlp(query, limit = 5) {
         });
 
         child.on("error", (error) => {
+            cleanup();
             reject(error);
         });
 
         child.on("close", (code) => {
+            cleanup();
             if (code !== 0) {
                 const wrapped = new Error("YTDLP_SEARCH_FAILED");
                 wrapped.cause = new Error(stderr || `exit_${code}`);
@@ -212,7 +255,7 @@ async function searchWithYtDlp(query, limit = 5) {
 async function getInfoWithYtDlp(url) {
     if (!url) return null;
     const binary = await ensureBinary();
-    const args = appendYoutubeExtractorArgs(appendCookiesArg([
+    const baseArgs = appendYoutubeJsRuntimeArgs(appendYoutubeExtractorArgs([
         url,
         "--no-playlist",
         "--skip-download",
@@ -222,6 +265,7 @@ async function getInfoWithYtDlp(url) {
         "--no-progress",
         "-q",
     ]), url);
+    const { args, cleanup } = prepareCookiesArgs(baseArgs);
 
     return new Promise((resolve, reject) => {
         const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -237,10 +281,12 @@ async function getInfoWithYtDlp(url) {
         });
 
         child.on("error", (error) => {
+            cleanup();
             reject(error);
         });
 
         child.on("close", (code) => {
+            cleanup();
             if (code !== 0) {
                 const wrapped = new Error("YTDLP_INFO_FAILED");
                 wrapped.cause = new Error(stderr || `exit_${code}`);
@@ -262,7 +308,7 @@ async function getInfoWithYtDlp(url) {
 
 function buildDownloadArgVariants(url, outputTemplate) {
     const variants = [
-        [
+        appendYoutubeJsRuntimeArgs([
             url,
             "--no-playlist",
             "--no-progress",
@@ -282,7 +328,7 @@ function buildDownloadArgVariants(url, outputTemplate) {
             outputTemplate,
             "--print",
             "after_move:%(filepath)s",
-        ],
+        ], url),
         [
             url,
             "--no-playlist",
@@ -313,7 +359,8 @@ function buildDownloadArgVariants(url, outputTemplate) {
 
 function runYtDlpDownload(binary, args) {
     return new Promise((resolve, reject) => {
-        const child = spawn(binary, appendCookiesArg(args), { stdio: ["ignore", "pipe", "pipe"] });
+        const runtime = prepareCookiesArgs(args);
+        const child = spawn(binary, runtime.args, { stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
 
@@ -326,12 +373,14 @@ function runYtDlpDownload(binary, args) {
         });
 
         child.on("error", (error) => {
+            runtime.cleanup();
             const wrapped = new Error("YTDLP_DOWNLOAD_FAILED");
             wrapped.cause = error;
             reject(wrapped);
         });
 
         child.on("close", (code) => {
+            runtime.cleanup();
             if (code !== 0) {
                 const wrapped = new Error("YTDLP_DOWNLOAD_FAILED");
                 const details = [stderr.trim(), stdout.trim()]
