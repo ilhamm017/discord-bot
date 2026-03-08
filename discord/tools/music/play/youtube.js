@@ -24,6 +24,23 @@ try {
     config = {};
 }
 
+function readConfigValue() {
+    try {
+        delete require.cache[require.resolve("../../../../config.json")];
+        return require("../../../../config.json");
+    } catch (error) {
+        return config || {};
+    }
+}
+
+function parsePositiveInteger(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return Math.floor(parsed);
+}
+
 const YT_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_youtube)
     ? config.search_results_limit_youtube
     : 5;
@@ -31,9 +48,17 @@ const SPOTIFY_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_spotif
     ? config.search_results_limit_spotify
     : 5;
 const SEARCH_OPTION_LIMIT = 25;
-const SEARCH_TIMEOUT_MS = Number.isInteger(config.music_search_timeout_ms)
-    ? config.music_search_timeout_ms
-    : 20000;
+
+function getSearchTimeoutMs() {
+    const latestConfig = readConfigValue();
+    const envOverride = process.env.MUSIC_SEARCH_TIMEOUT_MS;
+    return parsePositiveInteger(
+        envOverride != null && envOverride !== ""
+            ? envOverride
+            : latestConfig.music_search_timeout_ms,
+        20000
+    );
+}
 
 const {
     getYoutubeDurationMs,
@@ -84,6 +109,7 @@ function withTimeout(promise, timeoutMs, label) {
 async function handleYoutube(message, voiceChannel, query, validation, options = {}) {
     const forceTopYoutube = Boolean(options?.forceTopYoutube);
     const forceSelection = Boolean(options?.forceSelection);
+    const searchTimeoutMs = getSearchTimeoutMs();
     let url = query;
     let title;
     let info;
@@ -206,7 +232,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         let spotifyTimedOut = false;
         const youtubeSearchPromise = withTimeout(
             searchYoutube(query, YT_SEARCH_LIMIT),
-            SEARCH_TIMEOUT_MS,
+            searchTimeoutMs,
             "YOUTUBE_SEARCH"
         ).catch((error) => {
             if (error?.message === "YOUTUBE_SEARCH_TIMEOUT") {
@@ -219,7 +245,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         const spotifySearchPromise = isSpotifyConfigured()
             ? withTimeout(
                 searchSpotifyTracks(query, SPOTIFY_SEARCH_LIMIT),
-                SEARCH_TIMEOUT_MS,
+                searchTimeoutMs,
                 "SPOTIFY_SEARCH"
             )
                 .then((spotifyResults) => spotifyResults.map((track) => ({
