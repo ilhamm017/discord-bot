@@ -63,6 +63,20 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
     let url = query;
     let title;
     let info;
+    let progressMessage = null;
+
+    async function ensureProgress(content = "Sedang mencari dan menyiapkan lagu...") {
+        if (progressMessage) return progressMessage;
+        progressMessage = await message.reply(content);
+        return progressMessage;
+    }
+
+    async function sendFinal(content, extra = {}) {
+        if (progressMessage) {
+            return progressMessage.edit({ content, ...extra });
+        }
+        return message.reply({ content, ...extra });
+    }
 
     async function enqueueAndReply(track) {
         let result;
@@ -72,7 +86,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return message.reply(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
+            return sendFinal(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
         }
 
         try {
@@ -82,13 +96,13 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
 
         if (result.started) {
-            return message.reply(`Memutar: ${track.title}`);
+            return sendFinal(`Memutar: ${track.title}`);
         }
 
-        return message.reply(
-            `Ditambahkan ke antrian #${result.position}: ${track.title}`
-        );
+        return sendFinal(`Ditambahkan ke antrian #${result.position}: ${track.title}`);
     }
+
+    await ensureProgress();
 
     // 1. Playlist
     if (validation === "playlist") {
@@ -97,7 +111,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             playlistData = await fetchPlaylistVideos(query);
         } catch (error) {
             logger.error("Failed fetching playlist info.", error);
-            return message.reply("Gagal mengambil data playlist.");
+            return sendFinal("Gagal mengambil data playlist.");
         }
 
         const tracks = playlistData.videos
@@ -121,7 +135,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             .filter(Boolean);
 
         if (tracks.length === 0) {
-            return message.reply("Playlist kosong atau tidak bisa dibaca.");
+            return sendFinal("Playlist kosong atau tidak bisa dibaca.");
         }
 
         let result;
@@ -131,7 +145,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return message.reply(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
+            return sendFinal(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
         }
 
         try {
@@ -142,12 +156,12 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
 
         const playlistTitle = playlistData.title || "Playlist";
         if (result.started) {
-            return message.reply(
+            return sendFinal(
                 `Memutar playlist: ${playlistTitle} (${tracks.length} lagu).`
             );
         }
 
-        return message.reply(
+        return sendFinal(
             `Playlist ditambahkan: ${playlistTitle} (${tracks.length} lagu), mulai antrian #${result.startPosition}.`
         );
     }
@@ -202,7 +216,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         );
 
         if (combined.length === 0) {
-            return message.reply("Tidak menemukan hasil untuk judul itu.");
+            return sendFinal("Tidak menemukan hasil untuk judul itu.");
         }
 
         // Mention-target flow: always pick top YouTube result to avoid
@@ -233,12 +247,17 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
 
         if (forceTopYoutube && youtubeItems.length === 0) {
-            return message.reply("Tidak menemukan hasil YouTube untuk judul itu.");
+            return sendFinal("Tidak menemukan hasil YouTube untuk judul itu.");
         }
 
         const selectMenu = buildSearchSelect(combined);
         if (!selectMenu) {
-            return message.reply("Tidak menemukan hasil untuk judul itu.");
+            return sendFinal("Tidak menemukan hasil untuk judul itu.");
+        }
+
+        if (progressMessage) {
+            await progressMessage.delete().catch(() => { });
+            progressMessage = null;
         }
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -264,7 +283,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         videoId = play.extractID(url);
     } catch (error) {
         logger.warn("Invalid YouTube URL.", error);
-        return message.reply("URL tidak valid. Pastikan link YouTube video.");
+        return sendFinal("URL tidak valid. Pastikan link YouTube video.");
     }
 
     url = `https://www.youtube.com/watch?v=${videoId}`;

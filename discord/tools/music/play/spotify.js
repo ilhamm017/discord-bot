@@ -13,24 +13,41 @@ const {
 const { resolveSpotify } = require("../../../../functions/tools/music/spotify_logic");
 
 async function handleSpotify(message, voiceChannel, spotifyRef, query) {
+    let progressMessage = null;
+
+    async function ensureProgress(content = "Sedang mengambil dan memetakan lagu Spotify...") {
+        if (progressMessage) return progressMessage;
+        progressMessage = await message.reply(content);
+        return progressMessage;
+    }
+
+    async function sendFinal(content) {
+        if (progressMessage) {
+            return progressMessage.edit(content);
+        }
+        return message.reply(content);
+    }
+
     if (!isSpotifyConfigured()) {
         return message.reply(
             "Spotify API belum diset. Isi spotify_client_id dan spotify_client_secret di config.json."
         );
     }
 
+    await ensureProgress();
+
     let resultData;
     try {
         resultData = await resolveSpotify(spotifyRef);
     } catch (error) {
         logger.error("Failed fetching/resolving Spotify data.", error);
-        return message.reply(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal mengambil data dari Spotify.");
+        return sendFinal(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal mengambil data dari Spotify.");
     }
 
     const { collection, tracks, failedCount } = resultData;
 
     if (!tracks.length) {
-        return message.reply("Data Spotify kosong atau tidak bisa memetakan lagu ke YouTube.");
+        return sendFinal("Data Spotify kosong atau tidak bisa memetakan lagu ke YouTube.");
     }
 
     const formattedTracks = tracks.map((t) => {
@@ -65,7 +82,7 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return message.reply(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal memutar audio.");
+            return sendFinal(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal memutar audio.");
         }
 
         try {
@@ -75,9 +92,9 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
         }
 
         if (result.started) {
-            return message.reply(`Memutar: ${formattedTracks[0].title}`);
+            return sendFinal(`Memutar: ${formattedTracks[0].title}`);
         }
-        return message.reply(
+        return sendFinal(
             `Ditambahkan ke antrian #${result.position}: ${formattedTracks[0].title}`
         );
     }
@@ -90,7 +107,7 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
         });
     } catch (error) {
         logger.error("Queue error.", error);
-        return message.reply(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal memutar audio.");
+        return sendFinal(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal memutar audio.");
     }
 
     try {
@@ -101,13 +118,13 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
 
     const name = collection.name || "Spotify";
     if (result.started) {
-        return message.reply(
+        return sendFinal(
             `Memutar ${name} (${tracks.length} lagu).` +
             (failedCount ? ` ${failedCount} lagu gagal dipetakan.` : "")
         );
     }
 
-    return message.reply(
+    return sendFinal(
         `${name} ditambahkan (${tracks.length} lagu), mulai antrian #${result.startPosition}.` +
         (failedCount ? ` ${failedCount} lagu gagal dipetakan.` : "")
     );

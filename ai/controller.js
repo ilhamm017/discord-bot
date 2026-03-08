@@ -139,6 +139,113 @@ function tryBuildDirectReplyFromMusicBubble(userInput, context = {}) {
     return `Itu lagu **${title}**.`;
 }
 
+function isRuntimeStatusPrompt(userInput) {
+    const text = normalizeInlineText(userInput).toLowerCase();
+    if (!text) return false;
+    return [
+        /\bada error apa(?: sekarang)?\b/i,
+        /\bada masalah apa(?: sekarang)?\b/i,
+        /\bkenapa bot\b/i,
+        /\bkenapa yova\b/i,
+        /\bdiagnosa\b/i,
+        /\bdiagnosis\b/i,
+        /\btroubleshoot\b/i,
+    ].some((pattern) => pattern.test(text));
+}
+
+function isYoutubeCookieBotPrompt(userInput) {
+    const text = normalizeInlineText(userInput).toLowerCase();
+    if (!text) return false;
+    return /\bcookie(?:s)? youtube\b/i.test(text) &&
+        /\b(bot|server|yova|aman|sehat|valid|expired|bermasalah)\b/i.test(text);
+}
+
+function isMusicLagPrompt(userInput) {
+    const text = normalizeInlineText(userInput).toLowerCase();
+    if (!text) return false;
+    const lagLike = /\b(delay|lag|ngelag|tersendat|patah|putus putus|putus-putus|buffer|buffering|stutter)\b/i.test(text);
+    const musicLike = /\b(lagu|musik|music|pemutaran|playback|audio|suara)\b/i.test(text);
+    return lagLike && musicLike;
+}
+
+function parseQueueLengthFromMusicStatus(text) {
+    const match = String(text || "").match(/Queue length:\s*(\d+)/i);
+    return match ? Number(match[1]) : null;
+}
+
+function parseNowPlayingFromMusicStatus(text) {
+    const match = String(text || "").match(/Now playing:\s*(.+)$/im);
+    return match?.[1]?.trim() || null;
+}
+
+function buildRuntimeIssueSummary(diagnostics, { cookieOnly = false } = {}) {
+    const issues = Array.isArray(diagnostics?.issues) ? diagnostics.issues : [];
+    const filtered = cookieOnly
+        ? issues.filter((issue) => issue.kind === "youtube_cookies_invalid")
+        : issues;
+
+    if (filtered.length === 0) {
+        return cookieOnly
+            ? "Dari log terbaru, belum ada indikasi cookies YouTube bot sedang invalid."
+            : "Dari log terbaru, tidak ada error runtime yang jelas terdeteksi saat ini.";
+    }
+
+    const top = filtered[0];
+    if (cookieOnly) {
+        return `${top.summary} Kemungkinan penyebabnya: ${top.probableCause} Saran: ${top.suggestedAction}`;
+    }
+
+    const extra = filtered.slice(1, 3).map((item) => item.summary);
+    if (extra.length === 0) {
+        return `${top.summary} Kemungkinan penyebabnya: ${top.probableCause} Saran: ${top.suggestedAction}`;
+    }
+    return `${top.summary} Selain itu ada juga: ${extra.join(" ")} Kemungkinan utama: ${top.probableCause}`;
+}
+
+async function tryHandleRuntimeSelfDiagnostics(userInput, context = {}) {
+    if (!context?.guildId) return null;
+
+    const wantsRuntimeStatus = isRuntimeStatusPrompt(userInput);
+    const wantsCookieStatus = isYoutubeCookieBotPrompt(userInput);
+    const wantsMusicLag = isMusicLagPrompt(userInput);
+
+    if (!wantsRuntimeStatus && !wantsCookieStatus && !wantsMusicLag) {
+        return null;
+    }
+
+    const platform = require("../functions/platform");
+    const diagnostics = await platform.getRecentRuntimeIssues(80, true);
+
+    if (wantsCookieStatus) {
+        return buildRuntimeIssueSummary(diagnostics, { cookieOnly: true });
+    }
+
+    if (wantsMusicLag) {
+        const musicStatus = await platform.getMusicStatus(context.guildId);
+        const queueLength = parseQueueLengthFromMusicStatus(musicStatus);
+        const nowPlaying = parseNowPlayingFromMusicStatus(musicStatus);
+        const issues = Array.isArray(diagnostics?.issues) ? diagnostics.issues : [];
+        const voiceIssue = issues.find((item) => ["voice_drift", "lavalink_no_tracks", "youtube_cookies_invalid"].includes(item.kind));
+
+        if (voiceIssue) {
+            return `${voiceIssue.summary} Kemungkinan penyebabnya: ${voiceIssue.probableCause}` +
+                `${nowPlaying ? ` Sekarang yang terbaca diputar: ${nowPlaying}.` : ""}` +
+                `${queueLength != null ? ` Queue saat ini: ${queueLength}.` : ""}`;
+        }
+
+        return `Dari log terbaru, saya belum melihat error playback yang tegas.` +
+            `${nowPlaying ? ` Sekarang yang diputar: ${nowPlaying}.` : ""}` +
+            `${queueLength != null ? ` Queue saat ini ${queueLength}.` : ""}` +
+            ` Jadi kalau masih terasa lag, kemungkinan besar masalahnya ada di jalur voice/network atau runtime Lavalink, bukan karena antrian.`;
+    }
+
+    if (wantsRuntimeStatus) {
+        return buildRuntimeIssueSummary(diagnostics);
+    }
+
+    return null;
+}
+
 async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHistory = []) {
     // Default capabilities for backward compatibility (Full Access)
     const userCapabilities = context.capabilities || ["discord", "web", "memory", "session", "system", "reminder", "music", "social", "moderation"];
@@ -214,6 +321,15 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
             channelId: context.channelId || null,
         });
         return { type: "final", message: directReply, meta: buildMeta() };
+    }
+
+    const runtimeDiagnosticReply = await tryHandleRuntimeSelfDiagnostics(userInput, context);
+    if (runtimeDiagnosticReply) {
+        logger.info("Direct runtime diagnostic reply resolved from bot status prompt.", {
+            guildId: context.guildId || null,
+            channelId: context.channelId || null,
+        });
+        return { type: "final", message: runtimeDiagnosticReply, meta: buildMeta() };
     }
 
     const quickList = await tryHandleMemberListRequest(userInput, context);
@@ -570,4 +686,8 @@ module.exports = {
     isTrackIdentificationPrompt,
     stringifyServerContext,
     tryBuildDirectReplyFromMusicBubble,
+    isRuntimeStatusPrompt,
+    isYoutubeCookieBotPrompt,
+    isMusicLagPrompt,
+    tryHandleRuntimeSelfDiagnostics,
 };
