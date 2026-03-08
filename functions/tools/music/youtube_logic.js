@@ -1,6 +1,7 @@
 // functions/tools/music/youtube_logic.js
 const play = require("play-dl");
 const { search: searchWithYtDlp } = require("../../music/search");
+const logger = require("../../../utils/logger");
 
 function normalizeSourceText(value) {
     return String(value || "")
@@ -81,6 +82,32 @@ function rankYoutubeResults(results, query = "") {
         .map((entry) => entry.result);
 }
 
+function buildYoutubeSearchVariants(query) {
+    const original = String(query || "").trim();
+    if (!original) return [];
+
+    const normalized = original
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[|[\](){}]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const stripped = normalized
+        .replace(/\b(lyrics?|lyric video|official audio|official music video|music video|video clip|visualizer|audio)\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const variants = [
+        original,
+        normalized,
+        stripped,
+        stripped ? `${stripped} official audio` : "",
+    ].filter(Boolean);
+
+    return [...new Set(variants)];
+}
+
 function getYoutubeDurationMs(result) {
     if (!result) return null;
     if (Number.isFinite(result.durationInSec)) {
@@ -103,14 +130,40 @@ async function fetchPlaylistVideos(query) {
 
 async function searchYoutube(query, limit, { searchWithFallback = true } = {}) {
     let youtubeResults = [];
-    try {
-        youtubeResults = await play.search(query, { limit });
-    } catch (error) {
-        if (!searchWithFallback) throw error;
-    }
+    const queries = buildYoutubeSearchVariants(query);
 
-    if (searchWithFallback && (!Array.isArray(youtubeResults) || youtubeResults.length === 0)) {
-        youtubeResults = await searchWithYtDlp(query, limit);
+    for (const candidate of queries) {
+        try {
+            youtubeResults = await searchWithYtDlp(candidate, limit);
+        } catch (error) {
+            logger.warn("yt-dlp YouTube search failed.", {
+                query: candidate,
+                originalQuery: query,
+                message: error?.cause?.message || error?.message || String(error),
+                stderr: error?.details?.stderr || null,
+            });
+            if (!searchWithFallback) throw error;
+        }
+
+        if (Array.isArray(youtubeResults) && youtubeResults.length > 0) {
+            break;
+        }
+
+        if (searchWithFallback) {
+            try {
+                youtubeResults = await play.search(candidate, { limit });
+            } catch (error) {
+                logger.warn("play-dl YouTube search fallback failed.", {
+                    query: candidate,
+                    originalQuery: query,
+                    message: error?.message || String(error),
+                });
+            }
+        }
+
+        if (Array.isArray(youtubeResults) && youtubeResults.length > 0) {
+            break;
+        }
     }
 
     const rankedResults = rankYoutubeResults(youtubeResults, query);
@@ -128,6 +181,7 @@ async function searchYoutube(query, limit, { searchWithFallback = true } = {}) {
 module.exports = {
     getYoutubeDurationMs,
     fetchPlaylistVideos,
+    buildYoutubeSearchVariants,
     rankYoutubeResults,
     scoreYoutubeResult,
     searchYoutube,

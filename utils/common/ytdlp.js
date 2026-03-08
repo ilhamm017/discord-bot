@@ -190,7 +190,7 @@ async function searchWithYtDlp(query, limit = 5) {
     if (!query) return [];
     const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 25));
     const binary = await ensureBinary();
-    const baseArgs = [
+    const baseArgs = appendYoutubeJsRuntimeArgs([
         `ytsearch${safeLimit}:${query}`,
         "--no-playlist",
         "--skip-download",
@@ -199,7 +199,7 @@ async function searchWithYtDlp(query, limit = 5) {
         "--no-warnings",
         "--no-progress",
         "-q",
-    ];
+    ], "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
     const { args, cleanup } = prepareCookiesArgs(baseArgs);
 
     return new Promise((resolve, reject) => {
@@ -225,6 +225,12 @@ async function searchWithYtDlp(query, limit = 5) {
             if (code !== 0) {
                 const wrapped = new Error("YTDLP_SEARCH_FAILED");
                 wrapped.cause = new Error(stderr || `exit_${code}`);
+                wrapped.details = {
+                    code,
+                    stderr: stderr.trim() || null,
+                    stdout: stdout.trim() || null,
+                    query,
+                };
                 reject(wrapped);
                 return;
             }

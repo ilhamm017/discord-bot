@@ -3,6 +3,7 @@
 const assert = require("assert");
 
 const {
+  buildYoutubeSearchVariants,
   rankYoutubeResults,
   scoreYoutubeResult,
 } = require("../functions/tools/music/youtube_logic");
@@ -55,4 +56,13 @@ runCase("rankYoutubeResults promotes topic and official audio entries", () => {
   assert.strictEqual(ranked[0].channel.name, "Dschinghis Khan - Topic");
 });
 
-console.log("\nYouTube source quality regression passed (2/2)");
+runCase("buildYoutubeSearchVariants creates simpler fallback queries", () => {
+  const variants = buildYoutubeSearchVariants("End of Beginning | Official Audio | Lyrics");
+
+  assert.ok(variants.includes("End of Beginning | Official Audio | Lyrics"));
+  assert.ok(variants.includes("End of Beginning Official Audio Lyrics"));
+  assert.ok(variants.includes("End of Beginning"));
+  assert.ok(variants.includes("End of Beginning official audio"));
+});
+
+console.log("\nYouTube source quality regression passed (3/3)");

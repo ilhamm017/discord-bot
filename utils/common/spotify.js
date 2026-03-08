@@ -259,29 +259,57 @@ function pickBestResult(results, durationMs, query = "") {
 
 async function searchYoutubeCandidatesForSpotify(query, limit = 5) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 10));
+  const variants = Array.isArray(query)
+    ? query.filter(Boolean)
+    : [query].filter(Boolean);
 
-  // Prefer yt-dlp first because it's currently more resilient to YouTube payload changes.
-  try {
-    const ytdlpResults = await searchWithYtDlp(query, safeLimit);
-    if (Array.isArray(ytdlpResults) && ytdlpResults.length > 0) {
-      return ytdlpResults;
+  for (const candidate of variants) {
+    // Prefer yt-dlp first because it's currently more resilient to YouTube payload changes.
+    try {
+      const ytdlpResults = await searchWithYtDlp(candidate, safeLimit);
+      if (Array.isArray(ytdlpResults) && ytdlpResults.length > 0) {
+        return ytdlpResults;
+      }
+    } catch (error) {
+      logger.debug("yt-dlp search failed for Spotify resolver.", {
+        message: error?.cause?.message || error?.message || String(error),
+        stderr: error?.details?.stderr || null,
+        query: candidate,
+      });
     }
-  } catch (error) {
-    logger.debug("yt-dlp search failed for Spotify resolver.", {
-      message: error?.message || String(error),
-    });
-  }
 
-  try {
-    const playResults = await play.search(query, { limit: safeLimit });
-    if (Array.isArray(playResults)) return playResults;
-  } catch (error) {
-    logger.debug("play-dl search failed for Spotify resolver.", {
-      message: error?.message || String(error),
-    });
+    try {
+      const playResults = await play.search(candidate, { limit: safeLimit });
+      if (Array.isArray(playResults) && playResults.length > 0) return playResults;
+    } catch (error) {
+      logger.debug("play-dl search failed for Spotify resolver.", {
+        message: error?.message || String(error),
+        query: candidate,
+      });
+    }
   }
 
   return [];
+}
+
+function buildSpotifyYoutubeQueries(track) {
+  const artists = Array.isArray(track?.artists) ? track.artists.filter(Boolean) : [];
+  const title = String(track?.name || "").trim();
+  if (!title) return [];
+
+  const primaryArtist = artists[0] || "";
+  const base = [artists.join(" "), title].filter(Boolean).join(" - ").trim();
+  const compact = [primaryArtist, title].filter(Boolean).join(" ").trim();
+
+  const variants = [
+    `${base} official audio`,
+    base,
+    `${compact} official audio`,
+    compact,
+    title,
+  ].filter(Boolean);
+
+  return [...new Set(variants)];
 }
 
 async function resolveSpotifyTrackToYoutube(track) {
@@ -309,12 +337,12 @@ async function resolveSpotifyTrackToYoutube(track) {
     };
   }
 
-  const query = `${track.artists.join(" ")} - ${track.name}`.trim();
-  if (!query) return null;
+  const queries = buildSpotifyYoutubeQueries(track);
+  if (queries.length === 0) return null;
 
-  const results = await searchYoutubeCandidatesForSpotify(query, 5);
+  const results = await searchYoutubeCandidatesForSpotify(queries, 5);
 
-  const best = pickBestResult(results, track.durationMs, query);
+  const best = pickBestResult(results, track.durationMs, queries[0]);
   if (!best) return null;
 
   const url =

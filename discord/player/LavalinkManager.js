@@ -429,6 +429,12 @@ class LavalinkService {
             ) {
                 continue;
             }
+            if (
+                Number.isFinite(state.lastTrackEndAt) &&
+                now - state.lastTrackEndAt < 3000
+            ) {
+                continue;
+            }
 
             if (!this.canRunAutoAdvance(guildId)) continue;
 
@@ -582,6 +588,7 @@ class LavalinkService {
                 if (!state || !Array.isArray(state.queue) || state.queue.length === 0) {
                     return;
                 }
+                state.lastTrackEndAt = Date.now();
 
                 const mode = state.repeatMode || "off";
                 if (mode === "track") {

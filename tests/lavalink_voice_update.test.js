@@ -334,6 +334,56 @@ async function testWatchdogRepeatsSingleTrackMode() {
   }
 }
 
+async function testWatchdogWaitsBrieflyAfterTrackEndWhenRepeatIsOff() {
+  resetService();
+
+  const guildId = "guild-no-repeat";
+  const state = getOrCreateState(guildId);
+  state.queue = [
+    { title: "Song 1", url: "https://example.com/1" },
+    { title: "Song 2", url: "https://example.com/2" },
+  ];
+  state.currentIndex = 0;
+  state.repeatMode = "off";
+  state.channelId = "voice-no-repeat";
+  state.pendingPlayToken = null;
+  state.lastPlaybackRequestAt = Date.now() - 10_000;
+  state.lastTrackStartAt = Date.now() - 10_000;
+  state.lastTrackEndAt = Date.now();
+
+  const player = {
+    guildId,
+    playing: false,
+    paused: false,
+  };
+
+  lavalinkService.manager.players.set(guildId, player);
+
+  const playback = require("../discord/player/queue/playback");
+  const originalPlayIndex = playback.playIndex;
+  const originalPlayNext = playback.playNext;
+  let repeatedIndex = null;
+  let nextCalled = 0;
+
+  playback.playIndex = async (_state, index) => {
+    repeatedIndex = index;
+    return _state.queue[index];
+  };
+  playback.playNext = async () => {
+    nextCalled += 1;
+    return state.queue[1];
+  };
+
+  try {
+    await lavalinkService.runAutoAdvanceWatchdog();
+    assert.strictEqual(repeatedIndex, null);
+    assert.strictEqual(nextCalled, 0);
+  } finally {
+    playback.playIndex = originalPlayIndex;
+    playback.playNext = originalPlayNext;
+  }
+}
+
 async function testDriverUsesYoutubeCacheAfterPriming() {
   const mediaCache = require("../utils/common/media_cache");
   const driverPath = require.resolve("../discord/player/drivers/LavalinkDriver");
@@ -447,8 +497,9 @@ async function testDriverUsesYoutubeCacheAfterPriming() {
   await runCase("reconnect and move handlers update diagnostics", testReconnectDiagnosticsHandlers);
   await runCase("driver recreates a stale player once before playback", testDriverRecreatesStalePlayerOnce);
   await runCase("watchdog replays current track when repeat-track mode is enabled", testWatchdogRepeatsSingleTrackMode);
+  await runCase("watchdog waits briefly after track end when repeat is off", testWatchdogWaitsBrieflyAfterTrackEndWhenRepeatIsOff);
   await runCase("driver uses YouTube cache URL after priming before Lavalink search", testDriverUsesYoutubeCacheAfterPriming);
-  console.log("\nLavalink playback regression passed (6/6)");
+  console.log("\nLavalink playback regression passed (7/7)");
 })().catch((error) => {
   console.error(error);
   process.exit(1);
