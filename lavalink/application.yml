@@ -16,7 +16,7 @@ lavalink:
       vimeo: true
       mixer: false
       http: true
-      local: false
+      local: true
     bufferDurationMs: 1200 # Larger jitter buffer to reduce audible stutter on unstable links
     frameBufferDurationMs: 8000 # Keep more decoded frames to absorb short network/CPU hiccups
     opusEncodingQuality: 10 # Higher Opus encoder quality for cleaner output

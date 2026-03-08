@@ -17,6 +17,7 @@ services:
       LAVALINK_CONFIG_BACKUP_DIR: /app/.data/lavalink-config-backups
       AUDIO_CACHE_HOST: 127.0.0.1
       AUDIO_CACHE_PORT: 3211
+      AUDIO_CACHE_PLAYBACK_MODE: local
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}

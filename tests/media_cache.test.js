@@ -9,11 +9,13 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "audio-cache-test-"));
 process.env.AUDIO_CACHE_DIR = tempRoot;
 process.env.AUDIO_CACHE_HOST = "127.0.0.1";
 process.env.AUDIO_CACHE_PORT = "8765";
+process.env.AUDIO_CACHE_PLAYBACK_MODE = "http";
 
 const {
   ensureAudioCacheDir,
   extractYoutubeVideoId,
   getCachedTrackUrl,
+  getCachedPlaybackTarget,
   getMyInstantsCacheKey,
   getPlaybackSourceInfo,
   getPlaybackUrlForTrack,
@@ -67,7 +69,22 @@ runCase("getPlaybackSourceInfo marks cached YouTube playback correctly", () => {
     url: "http://127.0.0.1:8765/audio-cache/dQw4w9WgXcQ",
     mode: "cache",
     cacheKey: "dQw4w9WgXcQ",
+    filePath: path.join(tempRoot, "dQw4w9WgXcQ.webm"),
   });
+});
+
+runCase("getCachedPlaybackTarget returns local file path when local mode is enabled", () => {
+  process.env.AUDIO_CACHE_PLAYBACK_MODE = "local";
+  const source = getCachedPlaybackTarget("dQw4w9WgXcQ");
+
+  assert.deepStrictEqual(source, {
+    url: path.join(tempRoot, "dQw4w9WgXcQ.webm"),
+    mode: "local-cache",
+    cacheKey: "dQw4w9WgXcQ",
+    filePath: path.join(tempRoot, "dQw4w9WgXcQ.webm"),
+  });
+
+  process.env.AUDIO_CACHE_PLAYBACK_MODE = "http";
 });
 
 runCase("getPlaybackUrlForTrack falls back to original URL when cache is absent", () => {
@@ -111,4 +128,4 @@ runCase("getPlaybackUrlForTrack prefers local cache for MyInstants audio", () =>
   assert.strictEqual(url, `http://127.0.0.1:8765/audio-cache/${cacheKey}`);
 });
 
-console.log("\nMedia cache regression passed (7/7)");
+console.log("\nMedia cache regression passed (8/8)");

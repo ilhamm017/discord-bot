@@ -43,6 +43,15 @@ function getAudioCachePort() {
     return Number.isInteger(port) && port > 0 ? port : DEFAULT_CACHE_PORT;
 }
 
+function getAudioCachePlaybackMode() {
+    const raw =
+        process.env.AUDIO_CACHE_PLAYBACK_MODE ||
+        config.audio_cache_playback_mode ||
+        "local";
+    const normalized = String(raw || "").trim().toLowerCase();
+    return normalized === "http" ? "http" : "local";
+}
+
 function ensureAudioCacheDir() {
     const dir = getAudioCacheRoot();
     fs.mkdirSync(dir, { recursive: true });
@@ -91,6 +100,27 @@ function getCachedTrackUrl(videoId) {
     return buildCachedTrackUrl(videoId);
 }
 
+function getCachedPlaybackTarget(videoId) {
+    const filePath = findCachedFilePath(videoId);
+    if (!filePath) return null;
+
+    if (getAudioCachePlaybackMode() === "local") {
+        return {
+            url: filePath,
+            mode: "local-cache",
+            cacheKey: videoId,
+            filePath,
+        };
+    }
+
+    return {
+        url: buildCachedTrackUrl(videoId),
+        mode: "cache",
+        cacheKey: videoId,
+        filePath,
+    };
+}
+
 function getRemoteAudioCacheKey(prefix, sourceUrl) {
     const safePrefix = String(prefix || "").trim().toLowerCase();
     const safeUrl = String(sourceUrl || "").trim();
@@ -123,9 +153,9 @@ function markYoutubeTrack(track, options = {}) {
         originalUrl: sourceUrl,
     };
 
-    const cachedUrl = getCachedTrackUrl(youtubeVideoId);
-    if (cachedUrl) {
-        nextTrack.cachedUrl = cachedUrl;
+    const cachedTarget = getCachedPlaybackTarget(youtubeVideoId);
+    if (cachedTarget?.url) {
+        nextTrack.cachedUrl = cachedTarget.url;
     } else if ("cachedUrl" in nextTrack) {
         delete nextTrack.cachedUrl;
     }
@@ -144,18 +174,18 @@ function getPlaybackSourceInfo(track) {
 
     const youtubeVideoId = track.youtubeVideoId || extractYoutubeVideoId(track.originalUrl || track.url);
     if (youtubeVideoId) {
-        const cachedUrl = getCachedTrackUrl(youtubeVideoId);
-        if (cachedUrl) {
-            return { url: cachedUrl, mode: "cache", cacheKey: youtubeVideoId };
+        const cachedTarget = getCachedPlaybackTarget(youtubeVideoId);
+        if (cachedTarget?.url) {
+            return cachedTarget;
         }
     }
 
     if (track?.source === "myinstants") {
         const cacheKey = track.cacheKey || getMyInstantsCacheKey(track);
         if (cacheKey) {
-            const cachedUrl = getCachedTrackUrl(cacheKey);
-            if (cachedUrl) {
-                return { url: cachedUrl, mode: "cache", cacheKey };
+            const cachedTarget = getCachedPlaybackTarget(cacheKey);
+            if (cachedTarget?.url) {
+                return cachedTarget;
             }
         }
     }
@@ -398,8 +428,10 @@ module.exports = {
     extractYoutubeVideoId,
     findCachedFilePath,
     getAudioCacheHost,
+    getAudioCachePlaybackMode,
     getAudioCachePort,
     getCachedTrackUrl,
+    getCachedPlaybackTarget,
     getMyInstantsCacheKey,
     getPlaybackSourceInfo,
     getPlaybackUrlForTrack,
