@@ -12,7 +12,7 @@ async function runCase(name, fn) {
 }
 
 (async () => {
-await runCase("enqueueTracks resumes current index instead of skipping to next when queue is idle", async () => {
+await runCase("enqueueTracks starts newly added track when queue is idle", async () => {
   delete require.cache[controlsPath];
   delete require.cache[playbackPath];
   delete require.cache[playerManagerPath];
@@ -69,12 +69,12 @@ await runCase("enqueueTracks resumes current index instead of skipping to next w
       guild: { id: "guild-autostart" },
     };
 
-    await enqueueTracks(voiceChannel, [
-      { title: "Queued Song", url: "https://www.youtube.com/watch?v=bbbbbbbbbbb", youtubeVideoId: "bbbbbbbbbbb" },
-    ]);
+  await enqueueTracks(voiceChannel, [
+    { title: "Queued Song", url: "https://www.youtube.com/watch?v=bbbbbbbbbbb", youtubeVideoId: "bbbbbbbbbbb" },
+  ]);
 
-    assert.strictEqual(playIndexCalledWith, 0);
-    assert.strictEqual(playNextCalled, 0);
+  assert.strictEqual(playIndexCalledWith, 1);
+  assert.strictEqual(playNextCalled, 0);
   } finally {
     voice.getOrCreateState = originalGetOrCreateState;
     stateModule.persistQueueState = originalPersistQueueState;

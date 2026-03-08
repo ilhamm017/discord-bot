@@ -124,7 +124,6 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
         if (
             !wasEmpty &&
             !isPlaying &&
-            endedCurrentTrack &&
             firstNewIndex >= 0 &&
             firstNewIndex < state.queue.length
         ) {
@@ -132,7 +131,13 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
                 allowWrap: false,
                 maxAttempts: 1,
             }));
-        } else if (!wasEmpty && !isPlaying && state.currentIndex >= 0 && state.currentIndex < state.queue.length) {
+        } else if (
+            !wasEmpty &&
+            !isPlaying &&
+            endedCurrentTrack &&
+            state.currentIndex >= 0 &&
+            state.currentIndex < state.queue.length
+        ) {
             started = Boolean(await playIndex(state, state.currentIndex, {
                 allowWrap: false,
                 maxAttempts: 1,

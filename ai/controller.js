@@ -186,6 +186,16 @@ function parseNowPlayingFromMusicStatus(text) {
     return match?.[1]?.trim() || null;
 }
 
+function parsePlaybackStatusFromMusicStatus(text) {
+    const match = String(text || "").match(/Status:\s*(.+)$/im);
+    return match?.[1]?.trim().toLowerCase() || null;
+}
+
+function parseMusicModeFromMusicStatus(text) {
+    const match = String(text || "").match(/^Music:\s*(.+)$/im);
+    return match?.[1]?.trim().toLowerCase() || null;
+}
+
 function buildRuntimeIssueSummary(diagnostics, { cookieOnly = false } = {}) {
     const issues = Array.isArray(diagnostics?.issues) ? diagnostics.issues : [];
     const filtered = cookieOnly
@@ -235,16 +245,32 @@ async function tryHandleRuntimeSelfDiagnostics(userInput, context = {}) {
         let musicStatus = "";
         let queueLength = null;
         let nowPlaying = null;
+        let playbackStatus = null;
+        let musicMode = null;
 
         try {
             musicStatus = await platform.getMusicStatus(context.guildId);
             queueLength = parseQueueLengthFromMusicStatus(musicStatus);
             nowPlaying = parseNowPlayingFromMusicStatus(musicStatus);
+            playbackStatus = parsePlaybackStatusFromMusicStatus(musicStatus);
+            musicMode = parseMusicModeFromMusicStatus(musicStatus);
         } catch (error) {
             logger.warn("Runtime diagnostic failed to fetch music status; falling back to log-only explanation.", error);
         }
 
         if (voiceIssue) {
+            if (
+                voiceIssue.kind === "watchdog_recovery_loop" &&
+                queueLength != null &&
+                queueLength > 0 &&
+                (playbackStatus === "idle" || playbackStatus === "unknown" || musicMode === "queued (persisted)")
+            ) {
+                return `Antrian musik masih menunjuk track lama saat player sedang idle, jadi watchdog mencoba recovery dan bisa memutar ulang lagu sebelumnya.` +
+                    `${nowPlaying ? ` Track yang masih terbaca di state: ${nowPlaying}.` : ""}` +
+                    `${queueLength != null ? ` Queue saat ini: ${queueLength}.` : ""}` +
+                    ` Ini biasanya berarti state queue belum sinkron penuh setelah lagu selesai.`;
+            }
+
             return `${voiceIssue.summary} Kemungkinan penyebabnya: ${voiceIssue.probableCause}` +
                 `${nowPlaying ? ` Sekarang yang terbaca diputar: ${nowPlaying}.` : ""}` +
                 `${queueLength != null ? ` Queue saat ini: ${queueLength}.` : ""}`;
