@@ -2,6 +2,71 @@
 const play = require("play-dl");
 const { search: searchWithYtDlp } = require("../../music/search");
 
+function normalizeSourceText(value) {
+    return String(value || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+}
+
+function getChannelText(result) {
+    return normalizeSourceText(
+        result?.channel?.name ||
+        result?.channel?.title ||
+        result?.uploader ||
+        result?.author?.name ||
+        result?.channelName ||
+        ""
+    );
+}
+
+function scoreYoutubeResult(result, query = "") {
+    const title = normalizeSourceText(result?.title || "");
+    const channel = getChannelText(result);
+    const queryText = normalizeSourceText(query);
+    let score = 0;
+
+    if (!title) return score;
+
+    if (channel.includes("topic")) score += 35;
+    if (title.includes("official audio")) score += 28;
+    if (title.includes("audio resmi")) score += 28;
+    if (title.includes("lyrics")) score += 8;
+    if (title.includes("lyric video")) score += 6;
+    if (channel.includes("official")) score += 12;
+    if (channel && queryText && queryText.includes(channel)) score += 5;
+
+    if (queryText) {
+        const queryTerms = queryText.split(/\s+/).filter(Boolean);
+        const matchedTerms = queryTerms.filter((term) => title.includes(term)).length;
+        score += matchedTerms * 3;
+    }
+
+    if (/\b(remaster|remastered)\b/.test(title)) score += 4;
+
+    if (/\b(live|concert|performance|cover|karaoke|nightcore|slowed|reverb|8d|bass boosted|sped up|remix)\b/.test(title)) {
+        score -= 24;
+    }
+    if (/\b(shorts?)\b/.test(title)) score -= 20;
+    if (/\b(tiktok|edit audio|meme)\b/.test(title)) score -= 16;
+    if (/\b(fanmade|fan made|amv)\b/.test(title)) score -= 12;
+
+    const durationInSec =
+        Number.isFinite(result?.durationInSec) ? result.durationInSec :
+            Number.isFinite(result?.durationInSeconds) ? result.durationInSeconds :
+                Number.isFinite(result?.duration) ? result.duration :
+                    null;
+
+    if (Number.isFinite(durationInSec)) {
+        if (durationInSec < 45) score -= 18;
+        else if (durationInSec < 90) score -= 8;
+        else if (durationInSec > 900) score -= 10;
+    }
+
+    return score;
+}
+
 function getYoutubeDurationMs(result) {
     if (!result) return null;
     if (Number.isFinite(result.durationInSec)) {
@@ -45,6 +110,7 @@ async function searchYoutube(query, limit, { searchWithFallback = true } = {}) {
 }
 
 module.exports = {
+    scoreYoutubeResult,
     getYoutubeDurationMs,
     fetchPlaylistVideos,
     searchYoutube,
