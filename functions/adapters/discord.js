@@ -23,6 +23,15 @@ function isValidMessage(message) {
     return true;
 }
 
+function shouldFetchChatHistory(prompt, options = {}) {
+    if (options.replyContext) return true;
+
+    const text = String(prompt || "").toLowerCase().trim();
+    if (!text) return false;
+
+    return /\b(chat|pesan|riwayat|history|konteks|context|sebelumnya|tadi|barusan|bahas apa|ngomong apa|last message|msg)\b/i.test(text);
+}
+
 /**
  * Main handler for Discord messages
  * @param {Object} message - Discord message object
@@ -62,19 +71,20 @@ async function handleDiscordMessage(message, prompt, options = {}) {
         // 2. Typing Indicator (Prevent timeout feeling)
         message.channel.sendTyping().catch(() => { });
 
-        // 3. Get Chat History
-        // Fetch last 10 messages for context
-        const { getChatHistory } = require("../../utils/ai/ai_chat");
-        const historyRaw = await getChatHistory(message.channel, userId, message.client.user.id, message.id, {
-            includeOthers: true,
-            includeAuthorNames: true
-        });
+        // 3. Get Chat History only when the prompt clearly needs channel context.
+        let history = [];
+        if (shouldFetchChatHistory(prompt, options)) {
+            const { getChatHistory } = require("../../utils/ai/ai_chat");
+            const historyRaw = await getChatHistory(message.channel, userId, message.client.user.id, message.id, {
+                includeOthers: true,
+                includeAuthorNames: true
+            });
 
-        // Convert to OpenAI format
-        const history = historyRaw.map(msg => ({
-            role: msg.role === 'assistant' ? 'assistant' : 'user',
-            content: msg.role === 'assistant' ? msg.content : `${msg.authorName}: ${msg.content}`
-        }));
+            history = historyRaw.map(msg => ({
+                role: msg.role === 'assistant' ? 'assistant' : 'user',
+                content: msg.role === 'assistant' ? msg.content : `${msg.authorName}: ${msg.content}`
+            }));
+        }
 
         // 4. Run Agent
         const response = await runAiAgent(prompt, context, 5, history);
