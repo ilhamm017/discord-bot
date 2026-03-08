@@ -268,8 +268,12 @@ class LavalinkDriver {
             );
         }
 
-        // Ensure volume is set and player is not paused
-        await player.setVolume(100);
+        // Avoid sending a redundant volume PATCH right after play; some setups
+        // exhibit a tiny start glitch when track+volume are patched back-to-back.
+        const currentVolume = Number(player.volume);
+        if (!Number.isFinite(currentVolume) || currentVolume !== 100) {
+            await player.setVolume(100);
+        }
         if (player.paused) {
             await player.resume();
         }
