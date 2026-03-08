@@ -609,6 +609,8 @@ class LavalinkService {
             try {
                 const { playNext, playIndex } = require("./queue/playback");
                 const { getGuildState } = require("./voice");
+                const { persistQueueState, notifyPanel } = require("./queue/state");
+                const { clearQueueState } = require("../../storage/db");
 
                 const state = getGuildState(player.guildId);
                 if (!state || !Array.isArray(state.queue) || state.queue.length === 0) {
@@ -632,7 +634,15 @@ class LavalinkService {
 
                 if (mode === "all") {
                     await playIndex(state, 0);
+                    return;
                 }
+
+                state.queue = [];
+                state.currentIndex = -1;
+                state.playToken = (state.playToken || 0) + 1;
+                await clearQueueState(player.guildId);
+                await persistQueueState(state);
+                notifyPanel(state, "queue_finished");
             } catch (error) {
                 logger.error(`Lavalink trackEnd handler failed in guild ${player.guildId}.`, error);
             }
