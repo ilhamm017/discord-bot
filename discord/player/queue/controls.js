@@ -112,6 +112,7 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
     const endedCurrentTrack =
         Number.isFinite(state.lastTrackEndAt) &&
         (!Number.isFinite(state.lastTrackStartAt) || state.lastTrackEndAt >= state.lastTrackStartAt);
+    const firstNewIndex = startPosition - 1;
     const shouldAutoStart = wasEmpty || !isPlaying || state.currentIndex < 0 || hasInvalidPointer;
 
     // Auto-start if nothing was playing OR queue was completely empty (meaning no loop running)
@@ -124,10 +125,13 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
             !wasEmpty &&
             !isPlaying &&
             endedCurrentTrack &&
-            state.currentIndex >= 0 &&
-            state.currentIndex < state.queue.length - 1
+            firstNewIndex >= 0 &&
+            firstNewIndex < state.queue.length
         ) {
-            started = Boolean(await playNext(state));
+            started = Boolean(await playIndex(state, firstNewIndex, {
+                allowWrap: false,
+                maxAttempts: 1,
+            }));
         } else if (!wasEmpty && !isPlaying && state.currentIndex >= 0 && state.currentIndex < state.queue.length) {
             started = Boolean(await playIndex(state, state.currentIndex, {
                 allowWrap: false,

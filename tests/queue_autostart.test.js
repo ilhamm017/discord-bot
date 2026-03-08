@@ -89,7 +89,7 @@ await runCase("enqueueTracks resumes current index instead of skipping to next w
   }
 });
 
-await runCase("enqueueTracks advances to next track when previous track already ended", async () => {
+await runCase("enqueueTracks starts newly added track when previous track already ended", async () => {
   delete require.cache[controlsPath];
   delete require.cache[playbackPath];
   delete require.cache[playerManagerPath];
@@ -152,8 +152,8 @@ await runCase("enqueueTracks advances to next track when previous track already 
       { title: "New Song", url: "https://www.youtube.com/watch?v=bbbbbbbbbbb", youtubeVideoId: "bbbbbbbbbbb" },
     ]);
 
-    assert.strictEqual(playIndexCalledWith, null);
-    assert.strictEqual(playNextCalled, 1);
+    assert.strictEqual(playIndexCalledWith, 1);
+    assert.strictEqual(playNextCalled, 0);
   } finally {
     voice.getOrCreateState = originalGetOrCreateState;
     stateModule.persistQueueState = originalPersistQueueState;
