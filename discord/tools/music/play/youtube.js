@@ -31,6 +31,9 @@ const SPOTIFY_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_spotif
     ? config.search_results_limit_spotify
     : 5;
 const SEARCH_OPTION_LIMIT = 25;
+const SEARCH_TIMEOUT_MS = Number.isInteger(config.music_search_timeout_ms)
+    ? config.music_search_timeout_ms
+    : 8000;
 
 const {
     getYoutubeDurationMs,
@@ -54,6 +57,26 @@ function prepareYoutubeTrack(baseTrack, options = {}) {
     }
 
     return track;
+}
+
+function withTimeout(promise, timeoutMs, label) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            const error = new Error(`${label || "ASYNC_TASK"}_TIMEOUT`);
+            error.code = "TIMEOUT";
+            reject(error);
+        }, timeoutMs);
+
+        Promise.resolve(promise)
+            .then((value) => {
+                clearTimeout(timer);
+                resolve(value);
+            })
+            .catch((error) => {
+                clearTimeout(timer);
+                reject(error);
+            });
+    });
 }
 
 
@@ -178,21 +201,22 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
     } else {
         // 3. Search
-        let youtubeItems = [];
-        try {
-            youtubeItems = await searchYoutube(query, YT_SEARCH_LIMIT);
-        } catch (error) {
+        const youtubeSearchPromise = withTimeout(
+            searchYoutube(query, YT_SEARCH_LIMIT),
+            SEARCH_TIMEOUT_MS,
+            "YOUTUBE_SEARCH"
+        ).catch((error) => {
             logger.warn("YouTube search failed.", error);
-        }
+            return [];
+        });
 
-        let spotifyItems = [];
-        if (isSpotifyConfigured()) {
-            try {
-                const spotifyResults = await searchSpotifyTracks(
-                    query,
-                    SPOTIFY_SEARCH_LIMIT
-                );
-                spotifyItems = spotifyResults.map((track) => ({
+        const spotifySearchPromise = isSpotifyConfigured()
+            ? withTimeout(
+                searchSpotifyTracks(query, SPOTIFY_SEARCH_LIMIT),
+                SEARCH_TIMEOUT_MS,
+                "SPOTIFY_SEARCH"
+            )
+                .then((spotifyResults) => spotifyResults.map((track) => ({
                     source: "spotify",
                     title: track?.name || "Spotify Track",
                     artists: track?.artists || [],
@@ -204,11 +228,17 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
                         durationMs: track?.durationMs || 0,
                     },
                     url: track?.url || null,
-                }));
-            } catch (error) {
-                logger.warn("Failed searching Spotify, continuing.", error);
-            }
-        }
+                })))
+                .catch((error) => {
+                    logger.warn("Failed searching Spotify, continuing.", error);
+                    return [];
+                })
+            : Promise.resolve([]);
+
+        const [youtubeItems, spotifyItems] = await Promise.all([
+            youtubeSearchPromise,
+            spotifySearchPromise,
+        ]);
 
         const combined = [...youtubeItems, ...spotifyItems].slice(
             0,
