@@ -248,6 +248,24 @@ function classifyRuntimeIssue(line) {
     return null;
 }
 
+function classifyRuntimeRecovery(line) {
+    const text = String(line || "");
+
+    if (/Audio cache ready for (?:YouTube )?track|Audio cache hit for YouTube track/i.test(text)) {
+        return { kind: "youtube_cache_ready" };
+    }
+
+    if (/Resolved playback source.*"mode":"local-cache"|Resolved playback source.*mode["']?\s*:\s*["']local-cache["']/i.test(text)) {
+        return { kind: "youtube_local_cache_playback" };
+    }
+
+    if (/Lavalink playing:/i.test(text)) {
+        return { kind: "playback_started" };
+    }
+
+    return null;
+}
+
 async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
     try {
         const perFileLimit = Math.max(20, Math.min(Number(limit) || 60, 200));
@@ -259,6 +277,7 @@ async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
         const issuesByKind = new Map();
         const recentErrorLines = [];
         const scannedFiles = [];
+        let latestYoutubeRecoveryAt = null;
 
         for (const filePath of files) {
             const lines = readLastLines(filePath, perFileLimit);
@@ -284,6 +303,16 @@ async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
                         line: line.trim(),
                         timestamp: timestamp ? timestamp.toISOString() : null,
                     });
+                }
+
+                const recovery = classifyRuntimeRecovery(line);
+                if (recovery && timestamp) {
+                    if (
+                        !latestYoutubeRecoveryAt ||
+                        timestamp.getTime() > latestYoutubeRecoveryAt.getTime()
+                    ) {
+                        latestYoutubeRecoveryAt = timestamp;
+                    }
                 }
 
                 const issue = classifyRuntimeIssue(line);
@@ -312,13 +341,24 @@ async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
             return (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0) || b.count - a.count;
         });
 
+        const filteredIssues = issues.filter((issue) => {
+            if (!latestYoutubeRecoveryAt) return true;
+            if (!["youtube_cookies_invalid", "youtube_download_failed", "lavalink_no_tracks"].includes(issue.kind)) {
+                return true;
+            }
+            if (!issue.lastSeenAt) return true;
+            const issueTime = new Date(issue.lastSeenAt);
+            if (Number.isNaN(issueTime.getTime())) return true;
+            return issueTime.getTime() > latestYoutubeRecoveryAt.getTime();
+        });
+
         return {
-            status: issues.length > 0 ? "issues_detected" : "no_recent_issue_detected",
+            status: filteredIssues.length > 0 ? "issues_detected" : "no_recent_issue_detected",
             scannedFiles,
-            issues,
+            issues: filteredIssues,
             recentErrorLines: recentErrorLines.slice(-20),
-            summary: issues.length > 0
-                ? issues.slice(0, 3).map((item) => item.summary)
+            summary: filteredIssues.length > 0
+                ? filteredIssues.slice(0, 3).map((item) => item.summary)
                 : ["Tidak ada pola error runtime yang jelas di log terbaru."],
         };
     } catch (error) {

@@ -76,4 +76,26 @@ runCase("getRecentRuntimeIssues ignores stale errors outside recent window", asy
   assert.deepStrictEqual(result.issues, []);
 });
 
+runCase("getRecentRuntimeIssues suppresses cookie issue when newer playback recovery exists", async () => {
+  fs.writeFileSync(
+    botLog,
+    [
+      "[2026-03-08 10:11:25] warn: Audio cache download failed for track KpsJWFuVTdI.",
+      "ERROR: [youtube] KpsJWFuVTdI: Sign in to confirm you’re not a bot.",
+      "{\"timestamp\":\"2026-03-08T03:15:00.000Z\",\"level\":\"info\",\"message\":\"Audio cache ready for track KpsJWFuVTdI.\"}",
+      "{\"timestamp\":\"2026-03-08T03:15:01.000Z\",\"level\":\"info\",\"message\":\"Resolved playback source for guild 123.\",\"mode\":\"local-cache\"}",
+    ].join("\n"),
+    "utf8"
+  );
+
+  fs.writeFileSync(lavalinkLog, "", "utf8");
+  process.env.RUNTIME_DIAGNOSTIC_NOW = "2026-03-08T10:16:00+07:00";
+
+  const result = await getRecentRuntimeIssues(50, true);
+  const kinds = result.issues.map((item) => item.kind);
+
+  assert.strictEqual(result.status, "no_recent_issue_detected");
+  assert.ok(!kinds.includes("youtube_cookies_invalid"));
+});
+
 console.log("\nRuntime diagnostics regression passed");

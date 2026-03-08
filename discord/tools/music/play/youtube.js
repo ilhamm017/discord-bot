@@ -105,6 +105,14 @@ function withTimeout(promise, timeoutMs, label) {
     });
 }
 
+async function waitForOptionalResults(promise, timeoutMs) {
+    try {
+        return await withTimeout(promise, timeoutMs, "OPTIONAL_SEARCH");
+    } catch (error) {
+        return [];
+    }
+}
+
 
 async function handleYoutube(message, voiceChannel, query, validation, options = {}) {
     const forceTopYoutube = Boolean(options?.forceTopYoutube);
@@ -276,12 +284,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             spotifySearchPromise,
         ]);
 
-        const combined = [...youtubeItems, ...spotifyItems].slice(
-            0,
-            SEARCH_OPTION_LIMIT
-        );
-
-        if (combined.length === 0) {
+        if (youtubeItems.length === 0 && spotifyItems.length === 0) {
             if (youtubeTimedOut && spotifyTimedOut) {
                 return sendFinal("Pencarian YouTube dan Spotify sedang lambat. Coba lagi sebentar lagi, atau naikkan `music_search_timeout_ms` di config.");
             }
@@ -324,6 +327,20 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             }
             return sendFinal("Tidak menemukan hasil YouTube untuk judul itu.");
         }
+
+        let visibleResults = youtubeItems;
+        if (visibleResults.length > 0 && spotifyItems.length === 0 && isSpotifyConfigured()) {
+            const lateSpotifyItems = await waitForOptionalResults(spotifySearchPromise, 1500);
+            if (Array.isArray(lateSpotifyItems) && lateSpotifyItems.length > 0) {
+                visibleResults = [...visibleResults, ...lateSpotifyItems];
+            }
+        } else if (visibleResults.length === 0) {
+            visibleResults = spotifyItems;
+        } else {
+            visibleResults = [...visibleResults, ...spotifyItems];
+        }
+
+        const combined = visibleResults.slice(0, SEARCH_OPTION_LIMIT);
 
         const selectMenu = buildSearchSelect(combined);
         if (!selectMenu) {
