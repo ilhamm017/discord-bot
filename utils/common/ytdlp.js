@@ -18,6 +18,9 @@ try {
     config = {};
 }
 
+const YOUTUBE_PREFERRED_AUDIO_FORMAT =
+    "bestaudio[acodec=opus][ext=webm]/bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio/best";
+
 function getCookiesPath() {
     const configuredPath =
         process.env.YTDLP_COOKIES_PATH ||
@@ -126,7 +129,7 @@ async function streamWithYtDlp(url) {
         "--force-ipv4",
         "-q",
         "-f",
-        "bestaudio/best",
+        isYoutubeUrl(url) ? YOUTUBE_PREFERRED_AUDIO_FORMAT : "bestaudio/best",
         "--retries",
         "3",
         "--fragment-retries",
@@ -307,6 +310,9 @@ async function getInfoWithYtDlp(url) {
 }
 
 function buildDownloadArgVariants(url, outputTemplate) {
+    const preferredFormat = isYoutubeUrl(url)
+        ? YOUTUBE_PREFERRED_AUDIO_FORMAT
+        : "bestaudio/best";
     const variants = [
         appendYoutubeJsRuntimeArgs([
             url,
@@ -315,7 +321,7 @@ function buildDownloadArgVariants(url, outputTemplate) {
             "--no-simulate",
             "--force-ipv4",
             "-f",
-            "bestaudio/best",
+            preferredFormat,
             "--extractor-args",
             "youtube:player_client=android,web",
             "--retries",
@@ -336,7 +342,7 @@ function buildDownloadArgVariants(url, outputTemplate) {
             "--no-simulate",
             "--force-ipv4",
             "-f",
-            "bestaudio/best",
+            preferredFormat,
             "--retries",
             "3",
             "--fragment-retries",
