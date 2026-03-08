@@ -1117,6 +1117,7 @@ async function handleAiRequest(message, prompt, options = {}) {
 module.exports = {
   generateAiReply,
   handleAiRequest,
+  buildMusicContext,
   buildServerContext,
   buildMemorySummary,
   getAuthorCallName,

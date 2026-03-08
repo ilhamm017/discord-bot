@@ -168,6 +168,14 @@ function isMusicLagPrompt(userInput) {
     return lagLike && musicLike;
 }
 
+function isMusicFailurePrompt(userInput) {
+    const text = normalizeInlineText(userInput).toLowerCase();
+    if (!text) return false;
+    const failLike = /\b(gagal diputar|tidak bisa diputar|ga bisa diputar|nggak bisa diputar|kenapa.*diputar|kenapa.*gagal|error.*musik|error.*lagu)\b/i.test(text);
+    const musicLike = /\b(lagu|musik|music|pemutaran|playback|audio|suara)\b/i.test(text);
+    return failLike && musicLike;
+}
+
 function parseQueueLengthFromMusicStatus(text) {
     const match = String(text || "").match(/Queue length:\s*(\d+)/i);
     return match ? Number(match[1]) : null;
@@ -208,8 +216,9 @@ async function tryHandleRuntimeSelfDiagnostics(userInput, context = {}) {
     const wantsRuntimeStatus = isRuntimeStatusPrompt(userInput);
     const wantsCookieStatus = isYoutubeCookieBotPrompt(userInput);
     const wantsMusicLag = isMusicLagPrompt(userInput);
+    const wantsMusicFailure = isMusicFailurePrompt(userInput);
 
-    if (!wantsRuntimeStatus && !wantsCookieStatus && !wantsMusicLag) {
+    if (!wantsRuntimeStatus && !wantsCookieStatus && !wantsMusicLag && !wantsMusicFailure) {
         return null;
     }
 
@@ -220,12 +229,20 @@ async function tryHandleRuntimeSelfDiagnostics(userInput, context = {}) {
         return buildRuntimeIssueSummary(diagnostics, { cookieOnly: true });
     }
 
-    if (wantsMusicLag) {
-        const musicStatus = await platform.getMusicStatus(context.guildId);
-        const queueLength = parseQueueLengthFromMusicStatus(musicStatus);
-        const nowPlaying = parseNowPlayingFromMusicStatus(musicStatus);
+    if (wantsMusicLag || wantsMusicFailure) {
         const issues = Array.isArray(diagnostics?.issues) ? diagnostics.issues : [];
         const voiceIssue = issues.find((item) => ["voice_drift", "lavalink_no_tracks", "youtube_cookies_invalid"].includes(item.kind));
+        let musicStatus = "";
+        let queueLength = null;
+        let nowPlaying = null;
+
+        try {
+            musicStatus = await platform.getMusicStatus(context.guildId);
+            queueLength = parseQueueLengthFromMusicStatus(musicStatus);
+            nowPlaying = parseNowPlayingFromMusicStatus(musicStatus);
+        } catch (error) {
+            logger.warn("Runtime diagnostic failed to fetch music status; falling back to log-only explanation.", error);
+        }
 
         if (voiceIssue) {
             return `${voiceIssue.summary} Kemungkinan penyebabnya: ${voiceIssue.probableCause}` +
@@ -689,5 +706,6 @@ module.exports = {
     isRuntimeStatusPrompt,
     isYoutubeCookieBotPrompt,
     isMusicLagPrompt,
+    isMusicFailurePrompt,
     tryHandleRuntimeSelfDiagnostics,
 };
