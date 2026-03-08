@@ -8,6 +8,8 @@ const {
 } = require("../../models");
 const { Op } = require("sequelize");
 const logger = require("../../utils/logger");
+const fs = require("fs");
+const path = require("path");
 const { exec } = require("child_process");
 const util = require("util");
 const execPromise = util.promisify(exec);
@@ -93,6 +95,187 @@ async function searchWeb(query, maxResults = 5, safeSearch = true) {
     } catch (error) {
         logger.error(`Error in searchWeb: ${error.message}`);
         return [];
+    }
+}
+
+function getRuntimeDiagnosticLogFiles(includeLavalink = true) {
+    if (process.env.RUNTIME_DIAGNOSTIC_LOG_FILES) {
+        return process.env.RUNTIME_DIAGNOSTIC_LOG_FILES
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+
+    const cwd = process.cwd();
+    const files = [
+        path.resolve(cwd, "logs/error.log"),
+        path.resolve(cwd, "logs/combined.log"),
+        path.resolve(cwd, "logs/combined1.log"),
+    ];
+
+    if (includeLavalink) {
+        files.push(path.resolve(cwd, "lavalink/lavalink_server.log"));
+    }
+
+    return files;
+}
+
+function readLastLines(filePath, limit = 80) {
+    try {
+        if (!fs.existsSync(filePath)) return [];
+        const raw = fs.readFileSync(filePath, "utf8");
+        return raw
+            .split(/\r?\n/)
+            .filter((line) => line && line.trim())
+            .slice(-Math.max(1, limit));
+    } catch (error) {
+        logger.debug(`Failed to read runtime diagnostic log file: ${filePath}. ${error.message}`);
+        return [];
+    }
+}
+
+function classifyRuntimeIssue(line) {
+    const text = String(line || "");
+
+    const patterns = [
+        {
+            kind: "youtube_cookies_invalid",
+            severity: "high",
+            match: /cookies are no longer valid|cookies.*(?:expired|invalid|rotated)|sign in to confirm you.?re not a bot/i,
+            summary: "Cookies YouTube bermasalah atau sudah tidak valid.",
+            probableCause: "yt-dlp ditolak YouTube karena cookies login sudah expired, ter-rotate, atau tidak cocok.",
+            suggestedAction: "Upload ulang cookies YouTube yang fresh dari browser yang masih login, lalu restart bot/container.",
+        },
+        {
+            kind: "youtube_download_failed",
+            severity: "high",
+            match: /YTDLP_(?:DOWNLOAD|SEARCH)_FAILED|yt-dlp search failed|Audio cache download failed/i,
+            summary: "Pengambilan audio atau pencarian YouTube gagal.",
+            probableCause: "yt-dlp gagal mencari atau mengunduh source YouTube.",
+            suggestedAction: "Cek cookies YouTube, query pencarian, dan error yt-dlp terbaru.",
+        },
+        {
+            kind: "spotify_mapping_failed",
+            severity: "medium",
+            match: /Spotify resolver|play-dl search failed for Spotify resolver|Gagal memetakan Spotify/i,
+            summary: "Pemetaan lagu Spotify ke YouTube gagal.",
+            probableCause: "Resolver Spotify tidak menemukan kandidat YouTube yang valid atau fallback parser gagal.",
+            suggestedAction: "Coba query yang lebih spesifik atau periksa cookies/resolver YouTube.",
+        },
+        {
+            kind: "lavalink_no_tracks",
+            severity: "high",
+            match: /No tracks found via Lavalink|loadType=error, tracks=0/i,
+            summary: "Lavalink tidak menemukan track untuk diputar.",
+            probableCause: "Source playback tidak valid, cache lokal gagal dibangun, atau resolver remote ditolak.",
+            suggestedAction: "Periksa source query, status cache lokal, dan error YouTube/Lavalink sebelum baris ini.",
+        },
+        {
+            kind: "voice_drift",
+            severity: "medium",
+            match: /position drift exceeded|track stuck|buffer underrun/i,
+            summary: "Ada indikasi drift atau macet pada playback voice.",
+            probableCause: "Jitter koneksi voice, underrun buffer, atau pause singkat di runtime Lavalink.",
+            suggestedAction: "Cek kestabilan koneksi voice Discord dan log Lavalink saat stutter terjadi.",
+        },
+        {
+            kind: "watchdog_recovery_loop",
+            severity: "medium",
+            match: /Watchdog auto-(?:advancing|repeating)|watchdog failed/i,
+            summary: "Watchdog player sedang mencoba recovery atau mengulang track.",
+            probableCause: "Player dianggap idle/tidak sinkron sehingga watchdog memaksa play ulang atau next.",
+            suggestedAction: "Cek repeat mode, status queue, dan error playback tepat sebelum watchdog aktif.",
+        },
+        {
+            kind: "database_locked",
+            severity: "medium",
+            match: /SQLITE_BUSY|database is locked/i,
+            summary: "Database SQLite sedang terkunci.",
+            probableCause: "Ada kontensi akses database atau transaksi belum selesai saat operasi baru masuk.",
+            suggestedAction: "Kurangi konkurensi penulisan atau periksa operasi DB yang berjalan bersamaan.",
+        },
+    ];
+
+    for (const pattern of patterns) {
+        if (pattern.match.test(text)) {
+            return {
+                kind: pattern.kind,
+                severity: pattern.severity,
+                summary: pattern.summary,
+                probableCause: pattern.probableCause,
+                suggestedAction: pattern.suggestedAction,
+            };
+        }
+    }
+
+    return null;
+}
+
+async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
+    try {
+        const perFileLimit = Math.max(20, Math.min(Number(limit) || 60, 200));
+        const files = getRuntimeDiagnosticLogFiles(includeLavalink);
+        const issuesByKind = new Map();
+        const recentErrorLines = [];
+        const scannedFiles = [];
+
+        for (const filePath of files) {
+            const lines = readLastLines(filePath, perFileLimit);
+            if (lines.length === 0) continue;
+
+            scannedFiles.push(filePath);
+
+            for (const line of lines) {
+                if (/\b(error|warn|failed|exception|traceback|loadType=error|track stuck|drift)\b/i.test(line)) {
+                    recentErrorLines.push({
+                        file: filePath,
+                        line: line.trim(),
+                    });
+                }
+
+                const issue = classifyRuntimeIssue(line);
+                if (!issue) continue;
+
+                const existing = issuesByKind.get(issue.kind);
+                if (existing) {
+                    existing.count += 1;
+                    existing.lastSeenIn = filePath;
+                    existing.evidence = line.trim();
+                    continue;
+                }
+
+                issuesByKind.set(issue.kind, {
+                    ...issue,
+                    count: 1,
+                    lastSeenIn: filePath,
+                    evidence: line.trim(),
+                });
+            }
+        }
+
+        const issues = Array.from(issuesByKind.values()).sort((a, b) => {
+            const severityRank = { high: 3, medium: 2, low: 1 };
+            return (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0) || b.count - a.count;
+        });
+
+        return {
+            status: issues.length > 0 ? "issues_detected" : "no_recent_issue_detected",
+            scannedFiles,
+            issues,
+            recentErrorLines: recentErrorLines.slice(-20),
+            summary: issues.length > 0
+                ? issues.slice(0, 3).map((item) => item.summary)
+                : ["Tidak ada pola error runtime yang jelas di log terbaru."],
+        };
+    } catch (error) {
+        logger.error(`Error in getRecentRuntimeIssues: ${error.message}`);
+        return {
+            status: "diagnostic_failed",
+            error: error.message,
+            issues: [],
+            recentErrorLines: [],
+            scannedFiles: [],
+        };
     }
 }
 
@@ -375,6 +558,7 @@ async function logActionAudit(guildId, actorUserId, actionType, status, targetUs
 
 module.exports = {
     searchWeb,
+    getRecentRuntimeIssues,
     getUserProfile,
     setUserProfile,
     getUserMemory,

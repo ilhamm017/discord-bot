@@ -14,6 +14,7 @@ const {
     markYoutubeTrack,
     primeYoutubeTrack,
 } = require("../../../../utils/common/media_cache");
+const { getYoutubeUserFacingError } = require("../../../../utils/common/youtube_error");
 const { buildSearchSelect, shouldAutoPlaySearchQuery } = require("./utils");
 
 let config = {};
@@ -71,7 +72,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return message.reply("Gagal memutar audio.");
+            return message.reply(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
         }
 
         try {
@@ -130,7 +131,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return message.reply("Gagal memutar audio.");
+            return message.reply(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
         }
 
         try {

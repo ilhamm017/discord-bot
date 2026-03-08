@@ -80,7 +80,7 @@ function analyzeComplexity(prompt, options = {}) {
     const modRegex = /\b(hapus|delete|ban|kick|timeout|mute|warn|peringatan|unban|unmute|clear|purge|bersihkan|nuke|prune|slowmode|lock|unlock)\b/i;
     const reminderRegex = /\b(ingat|remind|nanti jam|besok|lusa|minggu depan|bulan depan|tahun depan|set reminder|alarm|timer|jadwal|schedule|agenda)\b/i;
     const gameRegex = /\b(tebak|teka-teki|riddle|puzzle|kuis|tebak-tebakan|permainan|jawab|siapakah aku|apa aku|tebak siapa)\b/i;
-    const statsRegex = /\b(limit|token|stats|status ai|ping|latency|uptime|memory|cpu|usage|quota|kredit|credit|health|info bot|data)\b/i;
+    const statsRegex = /\b(limit|token|stats|status ai|ping|latency|uptime|memory|cpu|usage|quota|kredit|credit|health|info bot|data|error|eror|masalah|bug|gangguan|diagnosa|diagnosis|troubleshoot|kenapa bot|kenapa error|cookies youtube|cookie youtube)\b/i;
     const socialRegex = /\b(bilang|bilangin|sampaikan|ucapkan|tanya|tanyain|panggil|greet|message|send|kirim|bisikin|bisik|katakan|kata|kasih tau|beritahukan)\b/i;
     const commandLikeRegex = /\b(putar|putarkan|play|skip|stop|pause|resume|ban|kick|timeout|hapus|delete|remind|ingatkan|cari|search|ringkas|rangkum|member|profil|role|join|leave|queue|antrian|kontrol|ucapkan|bilang|kirim|sound\s*effect|sfx|myinstants?)\b/i;
 

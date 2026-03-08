@@ -594,6 +594,21 @@ const tools = [
             tags: ["system"]
         }
     },
+    {
+        type: "function",
+        function: {
+            name: "getRecentRuntimeIssues",
+            description: "Inspect recent Yova and Lavalink logs, then return likely runtime issues and probable causes. Use this when the user asks why an error happened, why music/search failed, whether cookies YouTube are broken, or asks Yova to diagnose a current problem.",
+            parameters: {
+                type: "object",
+                properties: {
+                    limit: { type: "integer", description: "How many recent log lines to inspect per file.", default: 60 },
+                    includeLavalink: { type: "boolean", description: "Whether to inspect Lavalink logs too.", default: true }
+                }
+            },
+            tags: ["system", "music"]
+        }
+    },
     // --- Group J: Music ---
     {
         type: "function",

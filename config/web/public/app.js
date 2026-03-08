@@ -335,9 +335,10 @@ function getTokenHeader() {
     return { "x-config-token": token };
 }
 
-function formatCookieStatus(cookies) {
+function formatCookieStatus(cookies, health) {
     if (!cookies || !cookies.exists) {
-        return "Belum ada file cookies aktif.";
+        const suffix = health?.summary ? ` | ${health.summary}` : "";
+        return `Belum ada file cookies aktif.${suffix}`;
     }
 
     const parts = [
@@ -346,6 +347,12 @@ function formatCookieStatus(cookies) {
     ];
     if (cookies.updatedAt) {
         parts.push(`Update: ${cookies.updatedAt}`);
+    }
+    if (health?.status) {
+        parts.push(`Health: ${health.status}`);
+    }
+    if (health?.summary) {
+        parts.push(health.summary);
     }
     return parts.join(" | ");
 }
@@ -440,7 +447,8 @@ async function loadCookiesStatus() {
         throw new Error(data.error || "Gagal memuat status cookies.");
     }
 
-    setCookiesStatus(formatCookieStatus(data.cookies), data.cookies.exists ? "ok" : "info");
+    const kind = data.health?.status === "invalid" ? "error" : (data.cookies.exists ? "ok" : "info");
+    setCookiesStatus(formatCookieStatus(data.cookies, data.health), kind);
 }
 
 async function loadElevenLabsUsageStatus() {
@@ -504,7 +512,8 @@ async function uploadCookiesFile() {
     setCookiesStatus(`${data.message}${backupInfo}`, "ok");
     if (data.cookies) {
         setTimeout(() => {
-            setCookiesStatus(formatCookieStatus(data.cookies), "ok");
+            const kind = data.health?.status === "invalid" ? "error" : "ok";
+            setCookiesStatus(formatCookieStatus(data.cookies, data.health), kind);
         }, 1200);
     }
 }

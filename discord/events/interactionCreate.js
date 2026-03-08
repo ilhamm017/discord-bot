@@ -20,6 +20,7 @@ const {
     primeMyInstantsTrack,
     primeYoutubeTrack,
 } = require("../../utils/common/media_cache");
+const { getYoutubeUserFacingError } = require("../../utils/common/youtube_error");
 const {
     buildMyInstantsTrack,
     resolveMyInstantsResult,
@@ -264,7 +265,10 @@ module.exports = {
                     if (item.source === "spotify") {
                         const resolved = await resolveSpotifyTrackToYoutube(item.spotify || item);
                         if (!resolved?.url) {
-                            return interaction.followUp({ content: "Gagal petakan Spotify.", ephemeral: true });
+                            return interaction.followUp({
+                                content: "Gagal memetakan Spotify ke YouTube. Coba lagi atau cek cookies YouTube di panel web.",
+                                ephemeral: true
+                            });
                         }
                         track = markYoutubeTrack({
                             ...resolved,
@@ -331,7 +335,10 @@ module.exports = {
                     }
                 } catch (error) {
                     logger.error("Search select failed.", error);
-                    const payload = { content: "Terjadi error saat memilih hasil.", ephemeral: true };
+                    const payload = {
+                        content: getYoutubeUserFacingError(error, { spotify: item?.source === "spotify" }) || "Terjadi error saat memilih hasil.",
+                        ephemeral: true
+                    };
                     if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => { });
                     else await interaction.reply(payload).catch(() => { });
                 }

@@ -3,6 +3,7 @@ const { enqueueTrack, enqueueTracks, getState } = require("../../../player/queue
 const { updateControlPanel } = require("../../../player/panel");
 const logger = require("../../../../utils/logger");
 const { markYoutubeTrack, primeYoutubeTrack } = require("../../../../utils/common/media_cache");
+const { getYoutubeUserFacingError } = require("../../../../utils/common/youtube_error");
 const {
     isSpotifyConfigured,
     fetchSpotifyCollection,
@@ -23,7 +24,7 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
         resultData = await resolveSpotify(spotifyRef);
     } catch (error) {
         logger.error("Failed fetching/resolving Spotify data.", error);
-        return message.reply("Gagal mengambil data dari Spotify.");
+        return message.reply(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal mengambil data dari Spotify.");
     }
 
     const { collection, tracks, failedCount } = resultData;
@@ -64,7 +65,7 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return message.reply("Gagal memutar audio.");
+            return message.reply(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal memutar audio.");
         }
 
         try {
@@ -89,7 +90,7 @@ async function handleSpotify(message, voiceChannel, spotifyRef, query) {
         });
     } catch (error) {
         logger.error("Queue error.", error);
-        return message.reply("Gagal memutar audio.");
+        return message.reply(getYoutubeUserFacingError(error, { spotify: true }) || "Gagal memutar audio.");
     }
 
     try {

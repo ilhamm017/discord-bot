@@ -211,6 +211,7 @@ async function callTool(name, args, context = {}) {
             case 'sendAnnouncement': result = await platform.sendAnnouncement(cid, args.title, args.body, args.fields, args.footer); break;
 
             case 'searchWeb': result = await platform.searchWeb(args.query, args.maxResults, args.safeSearch); break;
+            case 'getRecentRuntimeIssues': result = await platform.getRecentRuntimeIssues(args.limit, args.includeLavalink); break;
 
             case 'getUserProfile': result = await platform.getUserProfile(gid, targetUid); break;
             case 'setUserProfile': result = await platform.setUserProfile(gid, targetUid, args.timezone, args.language, args.personaPreference); break;

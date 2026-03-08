@@ -236,8 +236,8 @@ function filterToolsByIntent(intent, tools) {
         reminder: ['createReminder', 'listUserReminders', 'cancelReminder'],
         search: ['searchWeb'],
         social: ['sendMessage', 'replyToMessage', 'sendAnnouncement', 'locateUser', 'findUserLocation', 'getServerInfo'],
-        music: ['playMusic', 'controlMusic', 'getMusicStatus'],
-        stats: ['getAiStats', 'getServerInfo']
+        music: ['playMusic', 'controlMusic', 'getMusicStatus', 'getRecentRuntimeIssues'],
+        stats: ['getAiStats', 'getServerInfo', 'getRecentRuntimeIssues']
     };
 
     const allowedTags = intentMap[intent] || ['system'];

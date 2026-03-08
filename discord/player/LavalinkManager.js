@@ -440,13 +440,39 @@ class LavalinkService {
 
             try {
                 const mode = state.repeatMode || "off";
+                const failedPlaybackByIndex = state.failedPlaybackByIndex || {};
+                const nextIndex = state.currentIndex + 1;
+                const nextFailure = failedPlaybackByIndex[nextIndex];
                 if (mode === "track" && state.queue[state.currentIndex]) {
+                    const repeatFailure = failedPlaybackByIndex[state.currentIndex];
+                    if (
+                        repeatFailure &&
+                        repeatFailure.reason === "youtube_auth" &&
+                        repeatFailure.until > now
+                    ) {
+                        logger.warn(
+                            `Watchdog skipped repeat recovery for guild ${guildId} ` +
+                            `because current track recently failed due to YouTube auth/cookies.`
+                        );
+                        continue;
+                    }
                     logger.warn(
                         `Watchdog auto-repeating Lavalink track in guild ${guildId} ` +
                         `(currentIndex=${state.currentIndex}).`
                     );
                     await playIndex(state, state.currentIndex, { allowWrap: false, maxAttempts: 1 });
                 } else if (state.currentIndex < state.queue.length - 1) {
+                    if (
+                        nextFailure &&
+                        nextFailure.reason === "youtube_auth" &&
+                        nextFailure.until > now
+                    ) {
+                        logger.warn(
+                            `Watchdog skipped immediate retry for guild ${guildId} ` +
+                            `because next track recently failed due to YouTube auth/cookies.`
+                        );
+                        continue;
+                    }
                     logger.warn(
                         `Watchdog auto-advancing Lavalink queue in guild ${guildId} ` +
                         `(currentIndex=${state.currentIndex}, queue=${state.queue.length}).`

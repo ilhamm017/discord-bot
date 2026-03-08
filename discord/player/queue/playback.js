@@ -11,8 +11,10 @@ const {
     primeMyInstantsTrack,
     primeYoutubeTrack,
 } = require("../../../utils/common/media_cache");
+const { isYoutubeCookiesError } = require("../../../utils/common/youtube_error");
 
 const PLAY_HISTORY_LIMIT = 25;
+const AUTH_FAILURE_COOLDOWN_MS = 90 * 1000;
 
 function cloneTrackForHistory(track) {
     if (!track || typeof track !== "object") return null;
@@ -201,6 +203,17 @@ async function playIndex(state, index, options = {}) {
             currentIndex = 0;
         }
 
+        const blockedFailure = state.failedPlaybackByIndex?.[currentIndex];
+        if (
+            blockedFailure &&
+            blockedFailure.reason === "youtube_auth" &&
+            blockedFailure.until > Date.now()
+        ) {
+            attempts += 1;
+            currentIndex += 1;
+            continue;
+        }
+
         if (tried.has(currentIndex)) return null;
         tried.add(currentIndex);
 
@@ -209,6 +222,23 @@ async function playIndex(state, index, options = {}) {
         } catch (error) {
             const failedTrack = queue[currentIndex];
             lastError = error;
+            const isYoutubeAuthFailure =
+                failedTrack?.source === "youtube" &&
+                isYoutubeCookiesError(error);
+
+            if (isYoutubeAuthFailure) {
+                state.failedPlaybackByIndex = state.failedPlaybackByIndex || {};
+                state.failedPlaybackByIndex[currentIndex] = {
+                    reason: "youtube_auth",
+                    at: Date.now(),
+                    until: Date.now() + AUTH_FAILURE_COOLDOWN_MS,
+                    title: failedTrack?.title || null,
+                    url: failedTrack?.url || null,
+                };
+            } else if (state.failedPlaybackByIndex?.[currentIndex]) {
+                delete state.failedPlaybackByIndex[currentIndex];
+            }
+
             logger.error("Playback failed, auto-skipping track.", {
                 index: currentIndex,
                 title: failedTrack?.title,

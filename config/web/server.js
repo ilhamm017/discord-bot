@@ -21,6 +21,7 @@ const {
     isLavalinkReachable,
     restartLavalinkProcess,
 } = require("./lavalink_control");
+const { getRecentRuntimeIssues } = require("../../functions/platform/core_logic");
 
 const HOST = process.env.CONFIG_WEB_HOST || "127.0.0.1";
 const PORT = Number(process.env.CONFIG_WEB_PORT || 3210);
@@ -120,6 +121,26 @@ function getCookiesStatus(config = readConfig()) {
     info.size = stat.size;
     info.updatedAt = stat.mtime.toISOString();
     return info;
+}
+
+async function getCookiesHealth(config = readConfig()) {
+    const cookies = getCookiesStatus(config);
+    const diagnostics = await getRecentRuntimeIssues(80, false);
+    const cookieIssue = Array.isArray(diagnostics.issues)
+        ? diagnostics.issues.find((issue) => issue.kind === "youtube_cookies_invalid")
+        : null;
+
+    return {
+        exists: cookies.exists,
+        status: cookieIssue ? "invalid" : (cookies.exists ? "ok" : "missing"),
+        summary: cookieIssue
+            ? cookieIssue.summary
+            : (cookies.exists ? "Belum ada indikasi cookies invalid di log terbaru." : "Belum ada file cookies aktif."),
+        suggestedAction: cookieIssue
+            ? cookieIssue.suggestedAction
+            : (cookies.exists ? "Jika playback YouTube masih gagal, upload ulang cookies terbaru." : "Upload cookies YouTube dari browser yang masih login."),
+        evidence: cookieIssue ? cookieIssue.evidence : null,
+    };
 }
 
 function writeUploadedCookies(content) {
@@ -273,6 +294,7 @@ const server = http.createServer(async (req, res) => {
             sendJson(res, 200, {
                 ok: true,
                 cookies: getCookiesStatus(config),
+                health: await getCookiesHealth(config),
             });
             return;
         }
@@ -370,6 +392,7 @@ const server = http.createServer(async (req, res) => {
                 message: "cookies.txt berhasil diupload dan diaktifkan.",
                 backup: backupName,
                 cookies: getCookiesStatus(nextConfig),
+                health: await getCookiesHealth(nextConfig),
             });
             return;
         }

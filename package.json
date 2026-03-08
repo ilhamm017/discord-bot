@@ -11,7 +11,7 @@
     "dev": "node index.js",
     "cli": "node cli.js",
     "config:web": "node config/web/server.js",
-    "test": "npm run test:intent-routing && npm run test:lavalink && npm run test:media-cache && npm run test:panel-history && npm run test:myinstants && npm run test:lavalink-config-web && npm run test:ai-voice-budget && npm run test:reply-context && npm run test:youtube-source-quality && npm run test:queue-autostart",
+    "test": "npm run test:intent-routing && npm run test:lavalink && npm run test:media-cache && npm run test:panel-history && npm run test:myinstants && npm run test:lavalink-config-web && npm run test:ai-voice-budget && npm run test:reply-context && npm run test:youtube-source-quality && npm run test:queue-autostart && npm run test:runtime-diagnostics",
     "test:reply-context": "node tests/ai_reply_context.test.js",
     "test:intent-routing": "node tests/ai_intent_routing.test.js",
     "test:lavalink": "node tests/lavalink_voice_update.test.js",
@@ -21,7 +21,8 @@
     "test:lavalink-config-web": "node tests/lavalink_config_web.test.js",
     "test:ai-voice-budget": "node tests/ai_voice_budget.test.js",
     "test:youtube-source-quality": "node tests/youtube_source_quality.test.js",
-    "test:queue-autostart": "node tests/queue_autostart.test.js"
+    "test:queue-autostart": "node tests/queue_autostart.test.js",
+    "test:runtime-diagnostics": "node tests/runtime_diagnostics.test.js"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.0",

@@ -384,6 +384,54 @@ async function testWatchdogWaitsBrieflyAfterTrackEndWhenRepeatIsOff() {
   }
 }
 
+async function testWatchdogSkipsRetryForRecentYoutubeAuthFailure() {
+  resetService();
+
+  const guildId = "guild-auth-cooldown";
+  const state = getOrCreateState(guildId);
+  state.queue = [
+    { title: "Song 1", url: "https://example.com/1", source: "youtube" },
+    { title: "Song 2", url: "https://example.com/2", source: "youtube" },
+  ];
+  state.currentIndex = 0;
+  state.repeatMode = "off";
+  state.channelId = "voice-auth";
+  state.pendingPlayToken = null;
+  state.lastPlaybackRequestAt = Date.now() - 10_000;
+  state.lastTrackStartAt = Date.now() - 10_000;
+  state.lastTrackEndAt = Date.now() - 10_000;
+  state.failedPlaybackByIndex = {
+    1: {
+      reason: "youtube_auth",
+      until: Date.now() + 60_000,
+    },
+  };
+
+  const player = {
+    guildId,
+    playing: false,
+    paused: false,
+  };
+
+  lavalinkService.manager.players.set(guildId, player);
+
+  const playback = require("../discord/player/queue/playback");
+  const originalPlayNext = playback.playNext;
+  let nextCalled = 0;
+
+  playback.playNext = async () => {
+    nextCalled += 1;
+    return state.queue[1];
+  };
+
+  try {
+    await lavalinkService.runAutoAdvanceWatchdog();
+    assert.strictEqual(nextCalled, 0, "watchdog should not immediately retry next track during YouTube auth cooldown");
+  } finally {
+    playback.playNext = originalPlayNext;
+  }
+}
+
 async function testDriverUsesYoutubeCacheAfterPriming() {
   const mediaCache = require("../utils/common/media_cache");
   const driverPath = require.resolve("../discord/player/drivers/LavalinkDriver");
@@ -498,8 +546,9 @@ async function testDriverUsesYoutubeCacheAfterPriming() {
   await runCase("driver recreates a stale player once before playback", testDriverRecreatesStalePlayerOnce);
   await runCase("watchdog replays current track when repeat-track mode is enabled", testWatchdogRepeatsSingleTrackMode);
   await runCase("watchdog waits briefly after track end when repeat is off", testWatchdogWaitsBrieflyAfterTrackEndWhenRepeatIsOff);
+  await runCase("watchdog skips immediate retry for recent YouTube auth failures", testWatchdogSkipsRetryForRecentYoutubeAuthFailure);
   await runCase("driver uses YouTube cache URL after priming before Lavalink search", testDriverUsesYoutubeCacheAfterPriming);
-  console.log("\nLavalink playback regression passed (7/7)");
+  console.log("\nLavalink playback regression passed (8/8)");
 })().catch((error) => {
   console.error(error);
   process.exit(1);
