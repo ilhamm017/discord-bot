@@ -17,10 +17,10 @@ lavalink:
       mixer: false
       http: true
       local: true
-    bufferDurationMs: 1200 # Larger jitter buffer to reduce audible stutter on unstable links
-    frameBufferDurationMs: 8000 # Keep more decoded frames to absorb short network/CPU hiccups
-    opusEncodingQuality: 10 # Higher Opus encoder quality for cleaner output
-    resamplingQuality: HIGH # Higher resampling quality for better fidelity
+    bufferDurationMs: 4000 # More jitter tolerance for transient VPS/voice delivery hiccups
+    frameBufferDurationMs: 15000 # Keep more decoded frames to absorb mid-song stalls
+    opusEncodingQuality: 7 # Slightly lower encoder load to prioritize stability over peak fidelity
+    resamplingQuality: MEDIUM # Reduce resampling CPU overhead during playback
     trackStuckThresholdMs: 30000 # Avoid premature "stuck" stop on transient jitter spikes
     useSeekGhosting: true # Seek ghosting is a technique to prevent audio artifacts when seeking by applying a small crossfade.
     youtubePlaylistLoadLimit: 6 # Number of pages at 100 per page
