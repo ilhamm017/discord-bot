@@ -109,6 +109,9 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
     const isPlaying = await PlayerManager.isPlaying(voiceChannel.guild.id);
     const hasInvalidPointer =
         state.currentIndex < -1 || state.currentIndex >= state.queue.length;
+    const endedCurrentTrack =
+        Number.isFinite(state.lastTrackEndAt) &&
+        (!Number.isFinite(state.lastTrackStartAt) || state.lastTrackEndAt >= state.lastTrackStartAt);
     const shouldAutoStart = wasEmpty || !isPlaying || state.currentIndex < 0 || hasInvalidPointer;
 
     // Auto-start if nothing was playing OR queue was completely empty (meaning no loop running)
@@ -117,7 +120,15 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
             `Auto-starting playback for guild ${voiceChannel.guild.id} ` +
             `(wasEmpty=${wasEmpty}, isPlaying=${isPlaying}, currentIndex=${state.currentIndex})`
         );
-        if (!wasEmpty && !isPlaying && state.currentIndex >= 0 && state.currentIndex < state.queue.length) {
+        if (
+            !wasEmpty &&
+            !isPlaying &&
+            endedCurrentTrack &&
+            state.currentIndex >= 0 &&
+            state.currentIndex < state.queue.length - 1
+        ) {
+            started = Boolean(await playNext(state));
+        } else if (!wasEmpty && !isPlaying && state.currentIndex >= 0 && state.currentIndex < state.queue.length) {
             started = Boolean(await playIndex(state, state.currentIndex, {
                 allowWrap: false,
                 maxAttempts: 1,
