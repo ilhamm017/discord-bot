@@ -7,6 +7,7 @@ RUN apt-get update \
         bash \
         ca-certificates \
         curl \
+        ffmpeg \
         g++ \
         make \
         openjdk-17-jre-headless \

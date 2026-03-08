@@ -62,6 +62,10 @@ function isValidVideoId(videoId) {
     return typeof videoId === "string" && /^[a-zA-Z0-9_-]{6,32}$/.test(videoId);
 }
 
+function isYoutubeCacheId(videoId) {
+    return typeof videoId === "string" && /^[a-zA-Z0-9_-]{11}$/.test(videoId);
+}
+
 function extractYoutubeVideoId(input) {
     if (!input) return null;
     if (isValidVideoId(input)) return input;
@@ -90,6 +94,36 @@ function findCachedFilePath(videoId) {
     }
 }
 
+function getPreferredYoutubeCacheContainers() {
+    const configured =
+        process.env.YOUTUBE_PREFERRED_CACHE_CONTAINERS ||
+        config.youtube_preferred_cache_containers ||
+        "webm,opus";
+    return String(configured)
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+}
+
+function isPreferredYoutubeCacheFile(filePath) {
+    const ext = path.extname(String(filePath || "")).toLowerCase().replace(/^\./, "");
+    if (!ext) return false;
+    return getPreferredYoutubeCacheContainers().includes(ext);
+}
+
+function removeCacheFile(filePath) {
+    try {
+        if (filePath && fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    } catch (error) {
+        logger.debug("Failed removing stale audio cache file.", {
+            filePath: filePath || null,
+            message: error?.message || String(error),
+        });
+    }
+}
+
 function buildCachedTrackUrl(videoId) {
     return `http://${getAudioCacheHost()}:${getAudioCachePort()}/audio-cache/${encodeURIComponent(videoId)}`;
 }
@@ -103,6 +137,15 @@ function getCachedTrackUrl(videoId) {
 function getCachedPlaybackTarget(videoId) {
     const filePath = findCachedFilePath(videoId);
     if (!filePath) return null;
+
+    if (isYoutubeCacheId(videoId) && !isPreferredYoutubeCacheFile(filePath)) {
+        logger.info(`Ignoring stale YouTube cache container for ${videoId}; rebuilding preferred audio cache.`, {
+            filePath,
+            preferredContainers: getPreferredYoutubeCacheContainers(),
+        });
+        removeCacheFile(filePath);
+        return null;
+    }
 
     if (getAudioCachePlaybackMode() === "local") {
         return {
@@ -219,7 +262,10 @@ async function downloadYoutubeTrack(videoId, sourceUrl) {
     const dir = ensureAudioCacheDir();
     const outputTemplate = path.join(dir, `${videoId}.%(ext)s`);
     const existing = findCachedFilePath(videoId);
-    if (existing) return existing;
+    if (existing && isPreferredYoutubeCacheFile(existing)) return existing;
+    if (existing) {
+        removeCacheFile(existing);
+    }
 
     cleanupPartialFiles(videoId);
     const filePath = await downloadAudioToFile(sourceUrl, outputTemplate);

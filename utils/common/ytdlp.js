@@ -310,6 +310,77 @@ async function getInfoWithYtDlp(url) {
 }
 
 function buildDownloadArgVariants(url, outputTemplate) {
+    if (isYoutubeUrl(url)) {
+        return [
+            appendYoutubeJsRuntimeArgs([
+                url,
+                "--no-playlist",
+                "--no-progress",
+                "--no-simulate",
+                "--force-ipv4",
+                "-f",
+                YOUTUBE_PREFERRED_AUDIO_FORMAT,
+                "--extractor-args",
+                "youtube:player_client=android,web",
+                "--extract-audio",
+                "--audio-format",
+                "opus",
+                "--audio-quality",
+                "0",
+                "--retries",
+                "3",
+                "--fragment-retries",
+                "3",
+                "--socket-timeout",
+                "15",
+                "--output",
+                outputTemplate,
+                "--print",
+                "after_move:%(filepath)s",
+            ], url),
+            appendYoutubeJsRuntimeArgs([
+                url,
+                "--no-playlist",
+                "--no-progress",
+                "--no-simulate",
+                "--force-ipv4",
+                "-f",
+                YOUTUBE_PREFERRED_AUDIO_FORMAT,
+                "--extractor-args",
+                "youtube:player_client=android,web",
+                "--retries",
+                "3",
+                "--fragment-retries",
+                "3",
+                "--socket-timeout",
+                "15",
+                "--output",
+                outputTemplate,
+                "--print",
+                "after_move:%(filepath)s",
+            ], url),
+            [
+                url,
+                "--no-playlist",
+                "--no-progress",
+                "--no-simulate",
+                "--force-ipv4",
+                "-f",
+                "bestaudio/best",
+                "--retries",
+                "3",
+                "--fragment-retries",
+                "3",
+                "--socket-timeout",
+                "15",
+                "--output",
+                outputTemplate,
+                "--print",
+                "after_move:%(filepath)s",
+            ],
+        ];
+    }
+
     const preferredFormat = isYoutubeUrl(url)
         ? YOUTUBE_PREFERRED_AUDIO_FORMAT
         : "bestaudio/best";

@@ -10,6 +10,7 @@ process.env.AUDIO_CACHE_DIR = tempRoot;
 process.env.AUDIO_CACHE_HOST = "127.0.0.1";
 process.env.AUDIO_CACHE_PORT = "8765";
 process.env.AUDIO_CACHE_PLAYBACK_MODE = "http";
+process.env.YOUTUBE_PREFERRED_CACHE_CONTAINERS = "webm,opus";
 
 const {
   ensureAudioCacheDir,
@@ -128,4 +129,22 @@ runCase("getPlaybackUrlForTrack prefers local cache for MyInstants audio", () =>
   assert.strictEqual(url, `http://127.0.0.1:8765/audio-cache/${cacheKey}`);
 });
 
-console.log("\nMedia cache regression passed (8/8)");
+runCase("stale YouTube mp4 cache is ignored when preferred container is webm or opus", () => {
+  const staleId = "abc123XYZ00";
+  fs.writeFileSync(path.join(tempRoot, `${staleId}.mp4`), "dummy");
+
+  const source = getPlaybackSourceInfo({
+    url: `https://www.youtube.com/watch?v=${staleId}`,
+    originalUrl: `https://www.youtube.com/watch?v=${staleId}`,
+    youtubeVideoId: staleId,
+  });
+
+  assert.deepStrictEqual(source, {
+    url: `https://www.youtube.com/watch?v=${staleId}`,
+    mode: "remote",
+    cacheKey: staleId,
+  });
+  assert.strictEqual(fs.existsSync(path.join(tempRoot, `${staleId}.mp4`)), false);
+});
+
+console.log("\nMedia cache regression passed (9/9)");
