@@ -500,7 +500,7 @@ class LavalinkService {
             },
             autoSkip: true,
             playerOptions: {
-                clientBasedPositionUpdateInterval: 100,
+                clientBasedPositionUpdateInterval: 500,
                 defaultSearchPlatform: "ytsearch",
                 volumeDecrementer: 1,
                 onDisconnect: {

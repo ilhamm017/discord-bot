@@ -1,6 +1,6 @@
 const { getGuildState, getOrCreateState } = require("../voice");
 const { persistQueueState, notifyPanel } = require("./state");
-const { ensureQueueState, playNext } = require("./playback");
+const { ensureQueueState, playIndex, playNext } = require("./playback");
 const { loadQueueState, clearQueueState, saveUserQueueHistory, loadUserQueueHistory } = require("../../../storage/db");
 const logger = require("../../../utils/logger");
 const {
@@ -117,7 +117,14 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
             `Auto-starting playback for guild ${voiceChannel.guild.id} ` +
             `(wasEmpty=${wasEmpty}, isPlaying=${isPlaying}, currentIndex=${state.currentIndex})`
         );
-        started = Boolean(await playNext(state));
+        if (!wasEmpty && !isPlaying && state.currentIndex >= 0 && state.currentIndex < state.queue.length) {
+            started = Boolean(await playIndex(state, state.currentIndex, {
+                allowWrap: false,
+                maxAttempts: 1,
+            }));
+        } else {
+            started = Boolean(await playNext(state));
+        }
     } else {
         logger.debug(
             `Playback not auto-started for guild ${voiceChannel.guild.id} ` +

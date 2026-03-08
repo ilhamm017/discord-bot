@@ -24,7 +24,7 @@ lavalink:
     trackStuckThresholdMs: 30000 # Avoid premature "stuck" stop on transient jitter spikes
     useSeekGhosting: true # Seek ghosting is a technique to prevent audio artifacts when seeking by applying a small crossfade.
     youtubePlaylistLoadLimit: 6 # Number of pages at 100 per page
-    playerUpdateInterval: 1 # How frequently to send player updates to clients, in seconds
+    playerUpdateInterval: 5 # Reduce update chatter between Lavalink and bot for steadier playback
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
@@ -55,8 +55,8 @@ logging:
     lavalink: INFO
 
   request:
-    enabled: true
+    enabled: false
     includeClientInfo: true
     includeHeaders: false
-    includePayload: true
-    includeQueryString: true
+    includePayload: false
+    includeQueryString: false
