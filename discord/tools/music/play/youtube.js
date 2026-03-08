@@ -33,7 +33,7 @@ const SPOTIFY_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_spotif
 const SEARCH_OPTION_LIMIT = 25;
 const SEARCH_TIMEOUT_MS = Number.isInteger(config.music_search_timeout_ms)
     ? config.music_search_timeout_ms
-    : 8000;
+    : 20000;
 
 const {
     getYoutubeDurationMs,
@@ -64,6 +64,7 @@ function withTimeout(promise, timeoutMs, label) {
         const timer = setTimeout(() => {
             const error = new Error(`${label || "ASYNC_TASK"}_TIMEOUT`);
             error.code = "TIMEOUT";
+            error.timeoutMs = timeoutMs;
             reject(error);
         }, timeoutMs);
 
@@ -201,11 +202,16 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
     } else {
         // 3. Search
+        let youtubeTimedOut = false;
+        let spotifyTimedOut = false;
         const youtubeSearchPromise = withTimeout(
             searchYoutube(query, YT_SEARCH_LIMIT),
             SEARCH_TIMEOUT_MS,
             "YOUTUBE_SEARCH"
         ).catch((error) => {
+            if (error?.message === "YOUTUBE_SEARCH_TIMEOUT") {
+                youtubeTimedOut = true;
+            }
             logger.warn("YouTube search failed.", error);
             return [];
         });
@@ -230,6 +236,9 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
                     url: track?.url || null,
                 })))
                 .catch((error) => {
+                    if (error?.message === "SPOTIFY_SEARCH_TIMEOUT") {
+                        spotifyTimedOut = true;
+                    }
                     logger.warn("Failed searching Spotify, continuing.", error);
                     return [];
                 })
@@ -246,6 +255,12 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         );
 
         if (combined.length === 0) {
+            if (youtubeTimedOut && spotifyTimedOut) {
+                return sendFinal("Pencarian YouTube dan Spotify sedang lambat. Coba lagi sebentar lagi, atau naikkan `music_search_timeout_ms` di config.");
+            }
+            if (youtubeTimedOut) {
+                return sendFinal("Pencarian YouTube sedang lambat atau timeout. Coba lagi sebentar lagi, atau naikkan `music_search_timeout_ms` di config.");
+            }
             return sendFinal("Tidak menemukan hasil untuk judul itu.");
         }
 
@@ -277,6 +292,9 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
 
         if (forceTopYoutube && youtubeItems.length === 0) {
+            if (youtubeTimedOut) {
+                return sendFinal("Pencarian YouTube sedang lambat atau timeout. Coba lagi sebentar lagi, atau naikkan `music_search_timeout_ms` di config.");
+            }
             return sendFinal("Tidak menemukan hasil YouTube untuk judul itu.");
         }
 

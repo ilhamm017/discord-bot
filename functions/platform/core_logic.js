@@ -134,6 +134,43 @@ function readLastLines(filePath, limit = 80) {
     }
 }
 
+function parseRuntimeLogTimestamp(line) {
+    const text = String(line || "").trim();
+    if (!text) return null;
+
+    let match = text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
+    if (match?.[1]) {
+        const parsed = new Date(match[1].replace(" ", "T"));
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    match = text.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))/);
+    if (match?.[1]) {
+        const parsed = new Date(match[1]);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    match = text.match(/"timestamp":"([^"]+)"/);
+    if (match?.[1]) {
+        const parsed = new Date(match[1]);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    return null;
+}
+
+function getRuntimeDiagnosticsReferenceNow() {
+    const override = process.env.RUNTIME_DIAGNOSTIC_NOW;
+    if (override) {
+        const parsed = new Date(override);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed;
+        }
+    }
+
+    return new Date();
+}
+
 function classifyRuntimeIssue(line) {
     const text = String(line || "");
 
@@ -214,6 +251,10 @@ function classifyRuntimeIssue(line) {
 async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
     try {
         const perFileLimit = Math.max(20, Math.min(Number(limit) || 60, 200));
+        const maxAgeMs = Number(process.env.RUNTIME_DIAGNOSTIC_MAX_AGE_MS) > 0
+            ? Number(process.env.RUNTIME_DIAGNOSTIC_MAX_AGE_MS)
+            : 15 * 60 * 1000;
+        const referenceNow = getRuntimeDiagnosticsReferenceNow();
         const files = getRuntimeDiagnosticLogFiles(includeLavalink);
         const issuesByKind = new Map();
         const recentErrorLines = [];
@@ -224,12 +265,24 @@ async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
             if (lines.length === 0) continue;
 
             scannedFiles.push(filePath);
+            let lastTimestamp = null;
 
             for (const line of lines) {
+                const parsedTimestamp = parseRuntimeLogTimestamp(line);
+                if (parsedTimestamp) {
+                    lastTimestamp = parsedTimestamp;
+                }
+
+                const timestamp = parsedTimestamp || lastTimestamp;
+                if (timestamp && referenceNow.getTime() - timestamp.getTime() > maxAgeMs) {
+                    continue;
+                }
+
                 if (/\b(error|warn|failed|exception|traceback|loadType=error|track stuck|drift)\b/i.test(line)) {
                     recentErrorLines.push({
                         file: filePath,
                         line: line.trim(),
+                        timestamp: timestamp ? timestamp.toISOString() : null,
                     });
                 }
 
@@ -249,6 +302,7 @@ async function getRecentRuntimeIssues(limit = 60, includeLavalink = true) {
                     count: 1,
                     lastSeenIn: filePath,
                     evidence: line.trim(),
+                    lastSeenAt: timestamp ? timestamp.toISOString() : null,
                 });
             }
         }

@@ -75,6 +75,7 @@ Catatan:
 - Compose hanya bind-mount file runtime penting seperti `config.json`, `.data/`, `database.sqlite`, log, dan `lavalink/application.yml`, jadi binary Lavalink bawaan image tidak ketimpa mount host.
 - Jika ingin mengunci panel web, set env `CONFIG_WEB_TOKEN` sebelum menjalankan compose.
 - Setelah ada perubahan kode bot, rebuild image dengan `docker compose up -d --build`.
+- Jika pencarian lagu terasa terlalu cepat timeout, naikkan `music_search_timeout_ms` dari panel config atau `config.json`.
 
 Perintah operasional:
 

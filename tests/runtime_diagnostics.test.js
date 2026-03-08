@@ -30,6 +30,7 @@ fs.writeFileSync(
 );
 
 process.env.RUNTIME_DIAGNOSTIC_LOG_FILES = `${botLog},${lavalinkLog}`;
+process.env.RUNTIME_DIAGNOSTIC_NOW = "2026-03-08T10:12:00+07:00";
 
 const { getRecentRuntimeIssues } = require("../functions/platform/core_logic");
 
@@ -49,6 +50,30 @@ runCase("getRecentRuntimeIssues detects youtube cookie and lavalink issues", asy
   assert.ok(kinds.includes("youtube_cookies_invalid"));
   assert.ok(kinds.includes("lavalink_no_tracks"));
   assert.ok(kinds.includes("voice_drift"));
+});
+
+runCase("getRecentRuntimeIssues ignores stale errors outside recent window", async () => {
+  fs.writeFileSync(
+    botLog,
+    [
+      "[2026-03-08 09:30:00] error: Playback failed, auto-skipping track.",
+      "Error: No tracks found via Lavalink (LoadType: error)",
+    ].join("\n"),
+    "utf8"
+  );
+
+  fs.writeFileSync(
+    lavalinkLog,
+    [
+      "2026-03-08T09:30:00.000+07:00 WARN track stuck for 3000ms",
+    ].join("\n"),
+    "utf8"
+  );
+
+  const result = await getRecentRuntimeIssues(50, true);
+
+  assert.strictEqual(result.status, "no_recent_issue_detected");
+  assert.deepStrictEqual(result.issues, []);
 });
 
 console.log("\nRuntime diagnostics regression passed");
