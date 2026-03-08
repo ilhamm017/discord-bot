@@ -230,8 +230,9 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         // 3. Search
         let youtubeTimedOut = false;
         let spotifyTimedOut = false;
+        const deadlineAt = Date.now() + searchTimeoutMs;
         const youtubeSearchPromise = withTimeout(
-            searchYoutube(query, YT_SEARCH_LIMIT),
+            searchYoutube(query, YT_SEARCH_LIMIT, { deadlineAt }),
             searchTimeoutMs,
             "YOUTUBE_SEARCH"
         ).catch((error) => {
