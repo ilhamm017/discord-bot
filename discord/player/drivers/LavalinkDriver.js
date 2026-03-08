@@ -198,7 +198,10 @@ class LavalinkDriver {
         });
         logger.debug(`Lavalink Search Query: "${query}"`);
 
-        let searchResult = await player.search({ query });
+        const searchOptions = playbackSource.mode === "local-cache"
+            ? { query, source: "local" }
+            : { query };
+        let searchResult = await player.search(searchOptions);
 
         if (
             query !== originalQuery &&

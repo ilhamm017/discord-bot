@@ -337,7 +337,7 @@ async function testWatchdogRepeatsSingleTrackMode() {
 async function testDriverUsesYoutubeCacheAfterPriming() {
   const mediaCache = require("../utils/common/media_cache");
   const driverPath = require.resolve("../discord/player/drivers/LavalinkDriver");
-  const originalGetPlaybackUrlForTrack = mediaCache.getPlaybackUrlForTrack;
+  const originalGetPlaybackSourceInfo = mediaCache.getPlaybackSourceInfo;
   const originalPrimeYoutubeTrack = mediaCache.primeYoutubeTrack;
   const originalCachedDriver = require.cache[driverPath];
 
@@ -348,8 +348,15 @@ async function testDriverUsesYoutubeCacheAfterPriming() {
     primed = true;
     return "/tmp/cache.webm";
   };
-  mediaCache.getPlaybackUrlForTrack = () => {
-    return primed ? "http://127.0.0.1:8765/audio-cache/yt-cache" : null;
+  mediaCache.getPlaybackSourceInfo = () => {
+    return primed
+      ? {
+          url: "/tmp/cache.webm",
+          mode: "local-cache",
+          cacheKey: "yt-cache",
+          filePath: "/tmp/cache.webm",
+        }
+      : { url: null, mode: "remote", cacheKey: null };
   };
 
   const freshDriver = require("../discord/player/drivers/LavalinkDriver");
@@ -366,6 +373,7 @@ async function testDriverUsesYoutubeCacheAfterPriming() {
     };
     const voiceChannel = { id: "voice-cache" };
     let searchQuery = null;
+    let searchSource = null;
 
     const player = {
       guildId,
@@ -376,8 +384,9 @@ async function testDriverUsesYoutubeCacheAfterPriming() {
       options: { voiceChannelId: "voice-cache" },
       voice: { sessionId: "session-cache" },
       queue: { tracks: [], current: null },
-      async search({ query }) {
+      async search({ query, source }) {
         searchQuery = query;
+        searchSource = source || null;
         return {
           loadType: "track",
           tracks: [{
@@ -416,11 +425,12 @@ async function testDriverUsesYoutubeCacheAfterPriming() {
     const result = await freshDriver.play(guildId, voiceChannel, track);
 
     assert.strictEqual(result, track);
-    assert.strictEqual(searchQuery, "http://127.0.0.1:8765/audio-cache/yt-cache");
+    assert.strictEqual(searchQuery, "/tmp/cache.webm");
+    assert.strictEqual(searchSource, "local");
     assert.strictEqual(player.playCalled, 1);
     assert.strictEqual(player.volumeSet, true);
   } finally {
-    mediaCache.getPlaybackUrlForTrack = originalGetPlaybackUrlForTrack;
+    mediaCache.getPlaybackSourceInfo = originalGetPlaybackSourceInfo;
     mediaCache.primeYoutubeTrack = originalPrimeYoutubeTrack;
     freshDriver.waitForConnected = originalWaitForConnected;
     freshDriver.waitForSessionId = originalWaitForSessionId;
