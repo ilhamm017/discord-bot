@@ -1,7 +1,7 @@
 const lavalinkService = require("../LavalinkManager");
 const logger = require("../../../utils/logger");
 const {
-    getPlaybackUrlForTrack,
+    getPlaybackSourceInfo,
     primeMyInstantsTrack,
     primeYoutubeTrack,
 } = require("../../../utils/common/media_cache");
@@ -185,9 +185,17 @@ class LavalinkDriver {
             }
         }
 
-        const cachedPlaybackUrl = getPlaybackUrlForTrack(track);
-        const query = cachedPlaybackUrl || track.url || track.title;
+        const playbackSource = getPlaybackSourceInfo(track);
+        const query = playbackSource.url || track.url || track.title;
         const originalQuery = track.originalUrl || track.originUrl || track.url || track.title;
+        logger.info(`Resolved playback source for guild ${guildId}.`, {
+            title: track?.title || null,
+            source: track?.source || null,
+            mode: playbackSource.mode,
+            query,
+            originalQuery,
+            cacheKey: playbackSource.cacheKey || null,
+        });
         logger.debug(`Lavalink Search Query: "${query}"`);
 
         let searchResult = await player.search({ query });
@@ -214,6 +222,12 @@ class LavalinkDriver {
         }
 
         const lavalinkTrack = searchResult.tracks[0];
+        const fallbackTitle = track?.title || originalQuery || "Unknown title";
+        if (!lavalinkTrack.info) {
+            lavalinkTrack.info = { title: fallbackTitle };
+        } else if (!lavalinkTrack.info.title || lavalinkTrack.info.title === "Unknown title") {
+            lavalinkTrack.info.title = fallbackTitle;
+        }
         if (track.requestedById) {
             lavalinkTrack.userData = { requesterId: track.requestedById };
         }

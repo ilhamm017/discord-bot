@@ -9,7 +9,22 @@ const { downloadAudioToFile } = require("./ytdlp");
 
 const DEFAULT_CACHE_HOST = "127.0.0.1";
 const DEFAULT_CACHE_PORT = 3211;
-const DOWNLOAD_CONCURRENCY = 1;
+let config = {};
+try {
+    config = require(path.join(process.cwd(), "config.json"));
+} catch (error) {
+    config = {};
+}
+
+const DOWNLOAD_CONCURRENCY = (() => {
+    const configured =
+        Number(process.env.AUDIO_CACHE_DOWNLOAD_CONCURRENCY) ||
+        Number(config.audio_cache_download_concurrency);
+    if (Number.isInteger(configured) && configured > 0) {
+        return Math.min(configured, 4);
+    }
+    return 2;
+})();
 
 const pendingDownloads = new Map(); // videoId -> Promise
 const downloadQueue = [];
@@ -119,15 +134,19 @@ function markYoutubeTrack(track, options = {}) {
 }
 
 function getPlaybackUrlForTrack(track) {
+    return getPlaybackSourceInfo(track).url;
+}
+
+function getPlaybackSourceInfo(track) {
     if (!track || typeof track !== "object") {
-        return null;
+        return { url: null, mode: "none", cacheKey: null };
     }
 
     const youtubeVideoId = track.youtubeVideoId || extractYoutubeVideoId(track.originalUrl || track.url);
     if (youtubeVideoId) {
         const cachedUrl = getCachedTrackUrl(youtubeVideoId);
         if (cachedUrl) {
-            return cachedUrl;
+            return { url: cachedUrl, mode: "cache", cacheKey: youtubeVideoId };
         }
     }
 
@@ -136,12 +155,16 @@ function getPlaybackUrlForTrack(track) {
         if (cacheKey) {
             const cachedUrl = getCachedTrackUrl(cacheKey);
             if (cachedUrl) {
-                return cachedUrl;
+                return { url: cachedUrl, mode: "cache", cacheKey };
             }
         }
     }
 
-    return track.originalUrl || track.originUrl || track.url || null;
+    return {
+        url: track.originalUrl || track.originUrl || track.url || null,
+        mode: "remote",
+        cacheKey: youtubeVideoId || track.cacheKey || getMyInstantsCacheKey(track) || null,
+    };
 }
 
 function cleanupPartialFiles(videoId) {
@@ -378,6 +401,7 @@ module.exports = {
     getAudioCachePort,
     getCachedTrackUrl,
     getMyInstantsCacheKey,
+    getPlaybackSourceInfo,
     getPlaybackUrlForTrack,
     isValidVideoId,
     markYoutubeTrack,

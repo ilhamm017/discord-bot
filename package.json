@@ -11,7 +11,7 @@
     "dev": "node index.js",
     "cli": "node cli.js",
     "config:web": "node config/web/server.js",
-    "test": "npm run test:intent-routing && npm run test:lavalink && npm run test:media-cache && npm run test:panel-history && npm run test:myinstants && npm run test:lavalink-config-web && npm run test:ai-voice-budget && npm run test:reply-context",
+    "test": "npm run test:intent-routing && npm run test:lavalink && npm run test:media-cache && npm run test:panel-history && npm run test:myinstants && npm run test:lavalink-config-web && npm run test:ai-voice-budget && npm run test:reply-context && npm run test:youtube-source-quality",
     "test:reply-context": "node tests/ai_reply_context.test.js",
     "test:intent-routing": "node tests/ai_intent_routing.test.js",
     "test:lavalink": "node tests/lavalink_voice_update.test.js",
@@ -19,7 +19,8 @@
     "test:panel-history": "node tests/panel_history.test.js",
     "test:myinstants": "node tests/myinstants.test.js",
     "test:lavalink-config-web": "node tests/lavalink_config_web.test.js",
-    "test:ai-voice-budget": "node tests/ai_voice_budget.test.js"
+    "test:ai-voice-budget": "node tests/ai_voice_budget.test.js",
+    "test:youtube-source-quality": "node tests/youtube_source_quality.test.js"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.0",

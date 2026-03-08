@@ -15,6 +15,7 @@ const {
   extractYoutubeVideoId,
   getCachedTrackUrl,
   getMyInstantsCacheKey,
+  getPlaybackSourceInfo,
   getPlaybackUrlForTrack,
   markYoutubeTrack,
 } = require("../utils/common/media_cache");
@@ -55,6 +56,20 @@ runCase("getPlaybackUrlForTrack prefers cached URL when available", () => {
   assert.strictEqual(url, "http://127.0.0.1:8765/audio-cache/dQw4w9WgXcQ");
 });
 
+runCase("getPlaybackSourceInfo marks cached YouTube playback correctly", () => {
+  const source = getPlaybackSourceInfo({
+    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    originalUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    youtubeVideoId: "dQw4w9WgXcQ",
+  });
+
+  assert.deepStrictEqual(source, {
+    url: "http://127.0.0.1:8765/audio-cache/dQw4w9WgXcQ",
+    mode: "cache",
+    cacheKey: "dQw4w9WgXcQ",
+  });
+});
+
 runCase("getPlaybackUrlForTrack falls back to original URL when cache is absent", () => {
   const url = getPlaybackUrlForTrack({
     url: "https://www.youtube.com/watch?v=9bZkp7q19f0",
@@ -64,6 +79,20 @@ runCase("getPlaybackUrlForTrack falls back to original URL when cache is absent"
 
   assert.strictEqual(url, "https://www.youtube.com/watch?v=9bZkp7q19f0");
   assert.strictEqual(getCachedTrackUrl("9bZkp7q19f0"), null);
+});
+
+runCase("getPlaybackSourceInfo marks remote fallback when cache is absent", () => {
+  const source = getPlaybackSourceInfo({
+    url: "https://www.youtube.com/watch?v=9bZkp7q19f0",
+    originalUrl: "https://www.youtube.com/watch?v=9bZkp7q19f0",
+    youtubeVideoId: "9bZkp7q19f0",
+  });
+
+  assert.deepStrictEqual(source, {
+    url: "https://www.youtube.com/watch?v=9bZkp7q19f0",
+    mode: "remote",
+    cacheKey: "9bZkp7q19f0",
+  });
 });
 
 runCase("getPlaybackUrlForTrack prefers local cache for MyInstants audio", () => {
@@ -82,4 +111,4 @@ runCase("getPlaybackUrlForTrack prefers local cache for MyInstants audio", () =>
   assert.strictEqual(url, `http://127.0.0.1:8765/audio-cache/${cacheKey}`);
 });
 
-console.log("\nMedia cache regression passed (5/5)");
+console.log("\nMedia cache regression passed (7/7)");

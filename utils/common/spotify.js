@@ -3,6 +3,7 @@ const path = require("path");
 const logger = require("../logger");
 const { getSpotifyCache, saveSpotifyCache } = require("../../storage/db");
 const { searchWithYtDlp } = require("./ytdlp");
+const { scoreYoutubeResult } = require("../../functions/tools/music/youtube_logic");
 
 let config = {};
 try {
@@ -230,23 +231,26 @@ function getResultDurationSeconds(result) {
   return null;
 }
 
-function pickBestResult(results, durationMs) {
+function pickBestResult(results, durationMs, query = "") {
   if (!Array.isArray(results) || results.length === 0) return null;
   const targetSeconds = durationMs ? Math.round(durationMs / 1000) : null;
   let fallback = null;
   let best = null;
   let bestDiff = Number.POSITIVE_INFINITY;
+  let bestQualityScore = Number.NEGATIVE_INFINITY;
 
   for (const result of results) {
     if (!result?.url && !result?.id) continue;
     if (!fallback) fallback = result;
+    const qualityScore = scoreYoutubeResult(result, query);
     if (!targetSeconds) continue;
     const seconds = getResultDurationSeconds(result);
     if (!seconds) continue;
     const diff = Math.abs(seconds - targetSeconds);
-    if (diff < bestDiff) {
+    if (diff < bestDiff || (diff === bestDiff && qualityScore > bestQualityScore)) {
       bestDiff = diff;
       best = result;
+      bestQualityScore = qualityScore;
     }
   }
 
@@ -310,7 +314,7 @@ async function resolveSpotifyTrackToYoutube(track) {
 
   const results = await searchYoutubeCandidatesForSpotify(query, 5);
 
-  const best = pickBestResult(results, track.durationMs);
+  const best = pickBestResult(results, track.durationMs, query);
   if (!best) return null;
 
   const url =

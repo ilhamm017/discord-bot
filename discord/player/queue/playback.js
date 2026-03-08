@@ -7,6 +7,10 @@ const {
     saveGuildPlaybackHistory,
 } = require("../../../storage/db");
 const logger = require("../../../utils/logger");
+const {
+    primeMyInstantsTrack,
+    primeYoutubeTrack,
+} = require("../../../utils/common/media_cache");
 
 const PLAY_HISTORY_LIMIT = 25;
 
@@ -58,6 +62,53 @@ function addTrackToHistory(state, track) {
     if (state.playHistory.length > PLAY_HISTORY_LIMIT) {
         state.playHistory = state.playHistory.slice(0, PLAY_HISTORY_LIMIT);
     }
+}
+
+function primeTrackInBackground(track) {
+    if (!track || typeof track !== "object") return;
+
+    if (track?.source === "myinstants") {
+        primeMyInstantsTrack(track).catch((error) => {
+            logger.debug("Background MyInstants prefetch failed.", {
+                title: track?.title || null,
+                url: track?.originalUrl || track?.url || null,
+                message: error?.message || String(error),
+            });
+        });
+        return;
+    }
+
+    if (track?.youtubeVideoId) {
+        primeYoutubeTrack(track).catch((error) => {
+            logger.debug("Background YouTube prefetch failed.", {
+                title: track?.title || null,
+                videoId: track?.youtubeVideoId || null,
+                url: track?.originalUrl || track?.url || null,
+                message: error?.message || String(error),
+            });
+        });
+    }
+}
+
+function prefetchUpcomingTrack(state, currentIndex) {
+    if (!state || !Array.isArray(state.queue) || state.queue.length === 0) return;
+
+    let nextIndex = currentIndex + 1;
+    if (nextIndex >= state.queue.length) {
+        if (state.repeatMode === "all") {
+            nextIndex = 0;
+        } else {
+            return;
+        }
+    }
+
+    if (nextIndex === currentIndex) return;
+    const nextTrack = state.queue[nextIndex];
+    if (!nextTrack) return;
+
+    queueMicrotask(() => {
+        primeTrackInBackground(nextTrack);
+    });
 }
 
 async function playIndexOnce(state, index) {
@@ -118,6 +169,7 @@ async function playIndexOnce(state, index) {
         url: track?.url,
         title: track?.title,
     });
+    prefetchUpcomingTrack(state, index);
     notifyPanel(state, "play");
     return track;
 }
