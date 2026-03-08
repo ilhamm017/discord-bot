@@ -70,6 +70,75 @@ const memberListState = new Map(); // sessionId -> { offset, limit, hasMore, upd
 const MEMBER_LIST_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_MEMBER_PAGE_SIZE = 10;
 
+function normalizeInlineText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function stringifyServerContext(serverContext) {
+    if (!serverContext) return "";
+    if (typeof serverContext === "string") {
+        return serverContext.trim();
+    }
+    if (typeof serverContext !== "object") {
+        return String(serverContext);
+    }
+
+    return Object.entries(serverContext)
+        .map(([key, value]) => {
+            if (value == null) return `${key}: -`;
+            if (typeof value === "string") return `${key}:\n${value}`;
+            try {
+                return `${key}:\n${JSON.stringify(value, null, 2)}`;
+            } catch (error) {
+                return `${key}: ${String(value)}`;
+            }
+        })
+        .join("\n\n")
+        .trim();
+}
+
+function extractTrackTitleFromReplyContext(replyContext) {
+    const text = normalizeInlineText(replyContext);
+    if (!text) return "";
+
+    const patterns = [
+        /memutar(?:\s+sound effect)?\s*:\s*(.+)$/i,
+        /memutar playlist\s*:\s*(.+)$/i,
+        /memutar lagi\s*:\s*(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match?.[1]) {
+            return match[1].trim();
+        }
+    }
+
+    return "";
+}
+
+function isTrackIdentificationPrompt(userInput) {
+    const text = normalizeInlineText(userInput).toLowerCase();
+    if (!text) return false;
+    return [
+        /^(ini\s+)?lagu apa( ini)?\??$/,
+        /^judul( lagu)?(nya)? apa\??$/,
+        /^yang diputar apa\??$/,
+        /^musik apa( ini)?\??$/,
+        /^sound effect apa( ini)?\??$/,
+    ].some((pattern) => pattern.test(text));
+}
+
+function tryBuildDirectReplyFromMusicBubble(userInput, context = {}) {
+    if (!context?.isReply || !context?.replyContext) return null;
+    if (!isTrackIdentificationPrompt(userInput)) return null;
+
+    const title = extractTrackTitleFromReplyContext(context.replyContext);
+    if (!title) return null;
+
+    return `Itu lagu **${title}**.`;
+}
+
 async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHistory = []) {
     // Default capabilities for backward compatibility (Full Access)
     const userCapabilities = context.capabilities || ["discord", "web", "memory", "session", "system", "reminder", "music", "social", "moderation"];
@@ -106,6 +175,8 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
     const maxTokensForTurn = useCompactPrompt ? 220 : 1500;
 
     let systemMessage = useCompactPrompt ? COMPACT_SYSTEM_PROMPT : SYSTEM_PROMPT;
+    const replyContext = normalizeInlineText(context.replyContext);
+    const serverContextText = stringifyServerContext(context.serverContext);
 
     // Add user info only when using full routing prompt.
     if (!useCompactPrompt && context.userSummary) {
@@ -117,11 +188,33 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
         systemMessage += `\n\n[IDs]\nGuild: ${context.guildId}\nChannel: ${context.channelId}`;
     }
 
+    if (replyContext) {
+        systemMessage += `\n\n[REPLY CONTEXT]\n${replyContext}`;
+    }
+
+    if (serverContextText) {
+        systemMessage += `\n\n[SERVER CONTEXT]\n${serverContextText}`;
+    }
+
+    const replyAlreadyInHistory = replyContext && messageHistory.some((item) => {
+        return item?.role === "assistant" && normalizeInlineText(item.content) === replyContext;
+    });
+
     let conversationHistory = [
         { role: "system", content: systemMessage },
         ...messageHistory,
+        ...(replyContext && !replyAlreadyInHistory ? [{ role: "assistant", content: replyContext }] : []),
         { role: "user", content: userInput }
     ];
+
+    const directReply = tryBuildDirectReplyFromMusicBubble(userInput, context);
+    if (directReply) {
+        logger.info("Direct music bubble reply resolved from reply context.", {
+            guildId: context.guildId || null,
+            channelId: context.channelId || null,
+        });
+        return { type: "final", message: directReply, meta: buildMeta() };
+    }
 
     const quickList = await tryHandleMemberListRequest(userInput, context);
     if (quickList) return { type: "final", message: quickList, meta: buildMeta() };
@@ -472,5 +565,9 @@ async function tryHandleMemberPagination(userInput, context = {}) {
 
 module.exports = {
     runAiAgent,
-    SYSTEM_PROMPT
+    SYSTEM_PROMPT,
+    extractTrackTitleFromReplyContext,
+    isTrackIdentificationPrompt,
+    stringifyServerContext,
+    tryBuildDirectReplyFromMusicBubble,
 };

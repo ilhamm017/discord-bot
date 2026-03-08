@@ -22,12 +22,14 @@ const CONFIG_TABS = [
     { id: "ai", label: "AI" },
     { id: "voice_ai", label: "Voice AI" },
     { id: "music", label: "Musik" },
+    { id: "runtime", label: "Runtime" },
     { id: "integrations", label: "Integrasi" },
     { id: "cookies", label: "Cookies" },
     { id: "lavalink", label: "Lavalink" },
 ];
 
 let rawConfig = {};
+let rawConfigNotes = {};
 let rawLavalinkConfig = {};
 let rawElevenLabsUsage = null;
 let activeTabId = "general";
@@ -126,6 +128,10 @@ function classifyConfigTab(key) {
         return "integrations";
     }
 
+    if (key.startsWith("log_") || key.startsWith("terminal_")) {
+        return "runtime";
+    }
+
     if (key.startsWith("search_") || key === "default_voice_channel") {
         return "music";
     }
@@ -173,6 +179,8 @@ function renderConfigForm(targetEl, registry, config, notes = {}) {
     const keys = Object.keys(config).sort((a, b) => a.localeCompare(b));
 
     keys.forEach((key) => {
+        if (key === "config_notes") return;
+
         const field = document.createElement("section");
         field.className = "field";
 
@@ -515,7 +523,8 @@ async function loadConfig() {
     }
 
     rawConfig = data.config;
-    renderConfigForm(formEl, fieldRegistry, rawConfig, isObject(rawConfig.config_notes) ? rawConfig.config_notes : {});
+    rawConfigNotes = isObject(data.notes) ? data.notes : {};
+    renderConfigForm(formEl, fieldRegistry, rawConfig, rawConfigNotes);
     renderVoiceAiSummary();
     updateVisibleSections();
     setMainStatus(`Terakhir update file: ${data.meta.updatedAt}`, "ok");

@@ -89,7 +89,7 @@ Setelah container aktif:
 - bot akan berjalan otomatis
 - panel config bisa dibuka di `http://127.0.0.1:3210`
 - jika `CONFIG_WEB_TOKEN` aktif, kirim header `x-config-token` dari browser client / request yang kamu pakai
-- log bot Yova akan ikut muncul di `docker compose logs -f yova` karena compose mengaktifkan `LOG_TO_STDOUT=true`
+- log bot Yova bisa diatur dari panel web lewat tab `Runtime`, terutama field `log_to_stdout`, `terminal_log_level`, dan `log_level`
 - log internal Lavalink tetap disimpan di `lavalink/logs/lavalink_server.log`
 
 Untuk melihat log realtime:

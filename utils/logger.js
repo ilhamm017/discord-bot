@@ -1,7 +1,42 @@
 const winston = require("winston");
 const path = require("path");
+const fs = require("fs");
 
 const logDir = path.resolve(process.cwd(), "logs");
+const configPath = path.resolve(process.cwd(), "config.json");
+
+function readLoggerConfig() {
+  try {
+    if (!fs.existsSync(configPath)) return {};
+    return JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function getStringSetting(envValue, configValue, fallback) {
+  if (typeof envValue === "string" && envValue.trim()) return envValue.trim();
+  if (typeof configValue === "string" && configValue.trim()) return configValue.trim();
+  return fallback;
+}
+
+function getBooleanSetting(envValue, configValue, fallback) {
+  if (typeof envValue === "string" && envValue.trim()) {
+    const normalized = envValue.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+  }
+  if (typeof configValue === "boolean") return configValue;
+  return fallback;
+}
+
+const loggerConfig = readLoggerConfig();
+const loggerLevel = getStringSetting(process.env.LOG_LEVEL, loggerConfig.log_level, "debug");
+const terminalLogLevel = getStringSetting(
+  process.env.TERMINAL_LOG_LEVEL,
+  loggerConfig.terminal_log_level,
+  loggerLevel
+);
 
 // Format kustom untuk log console yang lebih rapi
 const safeStringify = (obj) => {
@@ -47,7 +82,7 @@ const fileFormat = winston.format.combine(
 );
 
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || "debug",
+  level: loggerLevel,
   format: fileFormat,
   transports: [
     // Simpan semua log level error ke error.log
@@ -69,14 +104,14 @@ const logger = winston.createLogger({
 });
 
 const shouldLogToConsole =
-  process.env.LOG_TO_STDOUT === "1" ||
-  process.env.LOG_TO_STDOUT === "true" ||
+  getBooleanSetting(process.env.LOG_TO_STDOUT, loggerConfig.log_to_stdout, false) ||
   process.env.NODE_ENV !== "production";
 
 // Di Docker production kita tetap bisa paksa log ke stdout lewat LOG_TO_STDOUT.
 if (shouldLogToConsole) {
   logger.add(
     new winston.transports.Console({
+      level: terminalLogLevel,
       format: consoleFormat,
     })
   );

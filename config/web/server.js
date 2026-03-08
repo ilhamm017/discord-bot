@@ -26,6 +26,16 @@ const HOST = process.env.CONFIG_WEB_HOST || "127.0.0.1";
 const PORT = Number(process.env.CONFIG_WEB_PORT || 3210);
 const ACCESS_TOKEN = process.env.CONFIG_WEB_TOKEN || "";
 const MAX_BODY_BYTES = 1024 * 1024;
+const CONFIG_DEFAULTS = {
+    log_level: "debug",
+    terminal_log_level: "info",
+    log_to_stdout: true,
+};
+const CONFIG_FIELD_NOTES = {
+    log_level: "Level log utama Yova. Nilai ini menjadi batas minimum logger untuk file log dan event internal.",
+    terminal_log_level: "Level log yang tampil di terminal atau `docker compose logs`. Pilihan umum: debug, info, warn, error.",
+    log_to_stdout: "Jika aktif, log Yova dikirim juga ke stdout sehingga terlihat di terminal/docker.",
+};
 
 const JSON_HEADERS = {
     "Content-Type": "application/json; charset=utf-8",
@@ -55,6 +65,16 @@ function assertSafeObject(value, pathStack = []) {
 
 function readConfig() {
     return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+}
+
+function buildEditableConfig(config) {
+    const base = isPlainObject(config) ? { ...config } : {};
+    for (const [key, value] of Object.entries(CONFIG_DEFAULTS)) {
+        if (!(key in base)) {
+            base[key] = value;
+        }
+    }
+    return base;
 }
 
 function writeConfig(nextConfig) {
@@ -229,11 +249,12 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
 
-            const config = readConfig();
+            const config = buildEditableConfig(readConfig());
             const stat = fs.statSync(CONFIG_PATH);
             sendJson(res, 200, {
                 ok: true,
                 config,
+                notes: CONFIG_FIELD_NOTES,
                 meta: {
                     updatedAt: stat.mtime.toISOString(),
                     protected: Boolean(ACCESS_TOKEN),

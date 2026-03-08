@@ -22,8 +22,6 @@ services:
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
       YTDLP_COOKIES_PATH: ${YTDLP_COOKIES_PATH:-}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      LOG_TO_STDOUT: ${LOG_TO_STDOUT:-true}
     ports:
       - "3210:3210"
     volumes:

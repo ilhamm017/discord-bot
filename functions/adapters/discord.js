@@ -53,6 +53,7 @@ async function handleDiscordMessage(message, prompt, options = {}) {
             channelId,
             sessionId,
             isReply: !!options.replyContext,
+            replyContext: options.replyContext || "",
             capabilities: ["discord", "web", "memory", "session", "system", "reminder", "music"],
             serverContext: serverContextObj, // Object now
             userSummary: `User: ${callName || "User"}${memorySummary ? "\n" + memorySummary : ""}`
