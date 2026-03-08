@@ -93,7 +93,26 @@ function buildSearchSelect(results) {
 }
 
 function shouldAutoPlaySearchQuery(query) {
-    return false;
+    const text = String(query || "")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (!text) return false;
+
+    const tokens = text
+        .split(" ")
+        .map((token) => token.trim())
+        .filter(Boolean);
+
+    // Broad one-word query should still show selection menu.
+    if (tokens.length <= 1) return false;
+
+    const specificTokens = tokens.filter((token) => !BROAD_QUERY_STOPWORDS.has(token));
+
+    // Require at least 2 meaningful terms to assume user has specific intent.
+    return specificTokens.length >= 2;
 }
 
 module.exports = {

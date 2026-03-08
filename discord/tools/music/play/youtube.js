@@ -14,7 +14,6 @@ const {
     markYoutubeTrack,
     primeYoutubeTrack,
 } = require("../../../../utils/common/media_cache");
-const { getYoutubeUserFacingError } = require("../../../../utils/common/youtube_error");
 const { buildSearchSelect, shouldAutoPlaySearchQuery } = require("./utils");
 
 let config = {};
@@ -24,23 +23,6 @@ try {
     config = {};
 }
 
-function readConfigValue() {
-    try {
-        delete require.cache[require.resolve("../../../../config.json")];
-        return require("../../../../config.json");
-    } catch (error) {
-        return config || {};
-    }
-}
-
-function parsePositiveInteger(value, fallback) {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-        return fallback;
-    }
-    return Math.floor(parsed);
-}
-
 const YT_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_youtube)
     ? config.search_results_limit_youtube
     : 5;
@@ -48,17 +30,6 @@ const SPOTIFY_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_spotif
     ? config.search_results_limit_spotify
     : 5;
 const SEARCH_OPTION_LIMIT = 25;
-
-function getSearchTimeoutMs() {
-    const latestConfig = readConfigValue();
-    const envOverride = process.env.MUSIC_SEARCH_TIMEOUT_MS;
-    return parsePositiveInteger(
-        envOverride != null && envOverride !== ""
-            ? envOverride
-            : latestConfig.music_search_timeout_ms,
-        20000
-    );
-}
 
 const {
     getYoutubeDurationMs,
@@ -84,57 +55,13 @@ function prepareYoutubeTrack(baseTrack, options = {}) {
     return track;
 }
 
-function withTimeout(promise, timeoutMs, label) {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            const error = new Error(`${label || "ASYNC_TASK"}_TIMEOUT`);
-            error.code = "TIMEOUT";
-            error.timeoutMs = timeoutMs;
-            reject(error);
-        }, timeoutMs);
-
-        Promise.resolve(promise)
-            .then((value) => {
-                clearTimeout(timer);
-                resolve(value);
-            })
-            .catch((error) => {
-                clearTimeout(timer);
-                reject(error);
-            });
-    });
-}
-
-async function waitForOptionalResults(promise, timeoutMs) {
-    try {
-        return await withTimeout(promise, timeoutMs, "OPTIONAL_SEARCH");
-    } catch (error) {
-        return [];
-    }
-}
-
 
 async function handleYoutube(message, voiceChannel, query, validation, options = {}) {
     const forceTopYoutube = Boolean(options?.forceTopYoutube);
     const forceSelection = Boolean(options?.forceSelection);
-    const searchTimeoutMs = getSearchTimeoutMs();
     let url = query;
     let title;
     let info;
-    let progressMessage = null;
-
-    async function ensureProgress(content = "Sedang mencari dan menyiapkan lagu...") {
-        if (progressMessage) return progressMessage;
-        progressMessage = await message.reply(content);
-        return progressMessage;
-    }
-
-    async function sendFinal(content, extra = {}) {
-        if (progressMessage) {
-            return progressMessage.edit({ content, ...extra });
-        }
-        return message.reply({ content, ...extra });
-    }
 
     async function enqueueAndReply(track) {
         let result;
@@ -144,7 +71,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return sendFinal(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
+            return message.reply("Gagal memutar audio.");
         }
 
         try {
@@ -154,13 +81,13 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
 
         if (result.started) {
-            return sendFinal(`Memutar: ${track.title}`);
+            return message.reply(`Memutar: ${track.title}`);
         }
 
-        return sendFinal(`Ditambahkan ke antrian #${result.position}: ${track.title}`);
+        return message.reply(
+            `Ditambahkan ke antrian #${result.position}: ${track.title}`
+        );
     }
-
-    await ensureProgress();
 
     // 1. Playlist
     if (validation === "playlist") {
@@ -169,7 +96,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             playlistData = await fetchPlaylistVideos(query);
         } catch (error) {
             logger.error("Failed fetching playlist info.", error);
-            return sendFinal("Gagal mengambil data playlist.");
+            return message.reply("Gagal mengambil data playlist.");
         }
 
         const tracks = playlistData.videos
@@ -193,7 +120,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             .filter(Boolean);
 
         if (tracks.length === 0) {
-            return sendFinal("Playlist kosong atau tidak bisa dibaca.");
+            return message.reply("Playlist kosong atau tidak bisa dibaca.");
         }
 
         let result;
@@ -203,7 +130,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             });
         } catch (error) {
             logger.error("Queue error.", error);
-            return sendFinal(getYoutubeUserFacingError(error) || "Gagal memutar audio.");
+            return message.reply("Gagal memutar audio.");
         }
 
         try {
@@ -214,12 +141,12 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
 
         const playlistTitle = playlistData.title || "Playlist";
         if (result.started) {
-            return sendFinal(
+            return message.reply(
                 `Memutar playlist: ${playlistTitle} (${tracks.length} lagu).`
             );
         }
 
-        return sendFinal(
+        return message.reply(
             `Playlist ditambahkan: ${playlistTitle} (${tracks.length} lagu), mulai antrian #${result.startPosition}.`
         );
     }
@@ -236,28 +163,21 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
     } else {
         // 3. Search
-        let youtubeTimedOut = false;
-        let spotifyTimedOut = false;
-        const deadlineAt = Date.now() + searchTimeoutMs;
-        const youtubeSearchPromise = withTimeout(
-            searchYoutube(query, YT_SEARCH_LIMIT, { deadlineAt }),
-            searchTimeoutMs,
-            "YOUTUBE_SEARCH"
-        ).catch((error) => {
-            if (error?.message === "YOUTUBE_SEARCH_TIMEOUT") {
-                youtubeTimedOut = true;
-            }
+        let youtubeItems = [];
+        try {
+            youtubeItems = await searchYoutube(query, YT_SEARCH_LIMIT);
+        } catch (error) {
             logger.warn("YouTube search failed.", error);
-            return [];
-        });
+        }
 
-        const spotifySearchPromise = isSpotifyConfigured()
-            ? withTimeout(
-                searchSpotifyTracks(query, SPOTIFY_SEARCH_LIMIT),
-                searchTimeoutMs,
-                "SPOTIFY_SEARCH"
-            )
-                .then((spotifyResults) => spotifyResults.map((track) => ({
+        let spotifyItems = [];
+        if (isSpotifyConfigured()) {
+            try {
+                const spotifyResults = await searchSpotifyTracks(
+                    query,
+                    SPOTIFY_SEARCH_LIMIT
+                );
+                spotifyItems = spotifyResults.map((track) => ({
                     source: "spotify",
                     title: track?.name || "Spotify Track",
                     artists: track?.artists || [],
@@ -269,29 +189,19 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
                         durationMs: track?.durationMs || 0,
                     },
                     url: track?.url || null,
-                })))
-                .catch((error) => {
-                    if (error?.message === "SPOTIFY_SEARCH_TIMEOUT") {
-                        spotifyTimedOut = true;
-                    }
-                    logger.warn("Failed searching Spotify, continuing.", error);
-                    return [];
-                })
-            : Promise.resolve([]);
-
-        const [youtubeItems, spotifyItems] = await Promise.all([
-            youtubeSearchPromise,
-            spotifySearchPromise,
-        ]);
-
-        if (youtubeItems.length === 0 && spotifyItems.length === 0) {
-            if (youtubeTimedOut && spotifyTimedOut) {
-                return sendFinal("Pencarian YouTube dan Spotify sedang lambat. Coba lagi sebentar lagi, atau naikkan `music_search_timeout_ms` di config.");
+                }));
+            } catch (error) {
+                logger.warn("Failed searching Spotify, continuing.", error);
             }
-            if (youtubeTimedOut) {
-                return sendFinal("Pencarian YouTube sedang lambat atau timeout. Coba lagi sebentar lagi, atau naikkan `music_search_timeout_ms` di config.");
-            }
-            return sendFinal("Tidak menemukan hasil untuk judul itu.");
+        }
+
+        const combined = [...youtubeItems, ...spotifyItems].slice(
+            0,
+            SEARCH_OPTION_LIMIT
+        );
+
+        if (combined.length === 0) {
+            return message.reply("Tidak menemukan hasil untuk judul itu.");
         }
 
         // Mention-target flow: always pick top YouTube result to avoid
@@ -322,34 +232,12 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         }
 
         if (forceTopYoutube && youtubeItems.length === 0) {
-            if (youtubeTimedOut) {
-                return sendFinal("Pencarian YouTube sedang lambat atau timeout. Coba lagi sebentar lagi, atau naikkan `music_search_timeout_ms` di config.");
-            }
-            return sendFinal("Tidak menemukan hasil YouTube untuk judul itu.");
+            return message.reply("Tidak menemukan hasil YouTube untuk judul itu.");
         }
-
-        let visibleResults = youtubeItems;
-        if (visibleResults.length > 0 && spotifyItems.length === 0 && isSpotifyConfigured()) {
-            const lateSpotifyItems = await waitForOptionalResults(spotifySearchPromise, 1500);
-            if (Array.isArray(lateSpotifyItems) && lateSpotifyItems.length > 0) {
-                visibleResults = [...visibleResults, ...lateSpotifyItems];
-            }
-        } else if (visibleResults.length === 0) {
-            visibleResults = spotifyItems;
-        } else {
-            visibleResults = [...visibleResults, ...spotifyItems];
-        }
-
-        const combined = visibleResults.slice(0, SEARCH_OPTION_LIMIT);
 
         const selectMenu = buildSearchSelect(combined);
         if (!selectMenu) {
-            return sendFinal("Tidak menemukan hasil untuk judul itu.");
-        }
-
-        if (progressMessage) {
-            await progressMessage.delete().catch(() => { });
-            progressMessage = null;
+            return message.reply("Tidak menemukan hasil untuk judul itu.");
         }
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -375,7 +263,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         videoId = play.extractID(url);
     } catch (error) {
         logger.warn("Invalid YouTube URL.", error);
-        return sendFinal("URL tidak valid. Pastikan link YouTube video.");
+        return message.reply("URL tidak valid. Pastikan link YouTube video.");
     }
 
     url = `https://www.youtube.com/watch?v=${videoId}`;
