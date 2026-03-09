@@ -299,6 +299,11 @@ class LavalinkService {
             const guildId = raw.d?.guild_id;
             const managerClientId = this.manager.options?.client?.id;
             if (guildId && raw.d?.user_id === managerClientId) {
+                const { getGuildState } = require("./voice");
+                const state = getGuildState(guildId);
+                if (state) {
+                    state.channelId = raw.d.channel_id || null;
+                }
                 this.updateDiagnostics(guildId, {
                     lastVoiceSessionId: raw.d.session_id || null,
                     lastVoiceChannelId: raw.d.channel_id || null,
@@ -365,6 +370,11 @@ class LavalinkService {
     }
 
     handlePlayerDisconnect(player, voiceChannelId) {
+        const { getGuildState } = require("./voice");
+        const state = getGuildState(player.guildId);
+        if (state) {
+            state.channelId = voiceChannelId || null;
+        }
         const closeInfo = this.getLastVoiceClose(player.guildId);
         this.updateDiagnostics(player.guildId, {
             lastDisconnectAt: closeInfo?.at || Date.now(),
@@ -375,6 +385,11 @@ class LavalinkService {
     }
 
     handlePlayerReconnect(player, voiceChannelId) {
+        const { getGuildState } = require("./voice");
+        const state = getGuildState(player.guildId);
+        if (state && (voiceChannelId || player.voiceChannelId)) {
+            state.channelId = voiceChannelId || player.voiceChannelId;
+        }
         this.updateDiagnostics(player.guildId, {
             lastReconnectAt: Date.now(),
             lastVoiceChannelId: voiceChannelId || player.voiceChannelId || null,
@@ -383,6 +398,11 @@ class LavalinkService {
     }
 
     handlePlayerMove(player, oldVoiceChannelId, newVoiceChannelId) {
+        const { getGuildState } = require("./voice");
+        const state = getGuildState(player.guildId);
+        if (state) {
+            state.channelId = newVoiceChannelId || null;
+        }
         this.updateDiagnostics(player.guildId, {
             lastVoiceChannelId: newVoiceChannelId || null,
         });
