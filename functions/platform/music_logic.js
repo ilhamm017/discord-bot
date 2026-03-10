@@ -90,8 +90,37 @@ async function playMusic(guildId, userId, channelId, query, targetUserId = null,
         } else {
             let tracks = [];
 
-            // 1. Search Spotify if configured
-            if (isSpotifyConfigured()) {
+            // 1. Detect if it's a Spotify URL first
+            const spotifyRef = require("../../utils/common/spotify").parseSpotifyInput(query);
+            if (spotifyRef && isSpotifyConfigured()) {
+                try {
+                    const { fetchSpotifyCollection, resolveSpotifyTracks } = require("../../utils/common/spotify");
+                    const collection = await fetchSpotifyCollection(spotifyRef);
+                    if (collection.tracks && collection.tracks.length > 0) {
+                        const resolved = await resolveSpotifyTracks(collection.tracks);
+                        if (resolved.resolved.length > 0) {
+                            // Map the first few tracks into our internal tracks list
+                            // Note: AI tool currently mostly plays the first one found if we don't change the return logic
+                            tracks = resolved.resolved.map(item => ({
+                                url: item.url,
+                                title: item.title,
+                                durationMs: item.durationMs,
+                                thumbnail: item.thumbnail,
+                                youtubeVideoId: item.youtubeVideoId
+                            }));
+                        }
+                    }
+                } catch (err) {
+                    logger.debug("Spotify collection fetch failed in playMusic tool.", err.message);
+                    // Fallback to error message if it's a Spotify URL but we can't fetch it
+                    if (spotifyRef) {
+                        return { error: `Gagal mengambil data dari Spotify: ${err.message}` };
+                    }
+                }
+            }
+
+            // 2. Search Spotify if configured (for non-URL search queries)
+            if (tracks.length === 0 && isSpotifyConfigured()) {
                 try {
                     const spotifyResults = await searchSpotifyTracks(query, 10);
                     if (spotifyResults.length > 0) {
@@ -140,7 +169,7 @@ async function playMusic(guildId, userId, channelId, query, targetUserId = null,
             };
         }
 
-        if (!track) {
+        if (!track && tracks.length === 0) {
             return {
                 error: myInstantsRequest.shouldUseMyInstants
                     ? "Yova gak nemu sound effect MyInstants yang cocok."
@@ -149,22 +178,73 @@ async function playMusic(guildId, userId, channelId, query, targetUserId = null,
         }
 
         // 2. Play via Enqueue System (Ensures Unified Queue & Panel update)
-        const { enqueueTrack } = require("../../discord/player/queue");
-        const result = await enqueueTrack(voiceChannel, track, {
-            textChannelId: channelId
-        });
+        const { enqueueTrack, enqueueTracks } = require("../../discord/player/queue");
 
-        if (result.error) return result;
+        if (tracks.length > 1) {
+            // Handle playlist/multiple tracks
+            const formattedTracks = tracks.map(t => ({
+                ...t,
+                requestedBy: member.user.tag,
+                requestedById: userId,
+                requestedByTag: member.user.tag,
+                info: t.info || {
+                    video_details: {
+                        title: t.title,
+                        durationInSec: t.durationMs ? t.durationMs / 1000 : 0,
+                        thumbnails: t.thumbnail ? [{ url: t.thumbnail }] : []
+                    }
+                }
+            }));
 
-        return {
-            success: true,
-            status: result.started ? "playing" : "queued",
-            title: track.title,
-            position: result.position
-        };
+            const result = await enqueueTracks(voiceChannel, formattedTracks, {
+                textChannelId: channelId
+            });
+
+            if (result.error) return result;
+
+            return {
+                success: true,
+                status: result.started ? "playing" : "queued",
+                title: spotifyRef ? (spotifyRef.type === 'playlist' ? 'playlist' : 'album') : "koleksi lagu",
+                trackCount: tracks.length,
+                position: result.startPosition
+            };
+        } else {
+            // Handle single track
+            if (!track && tracks.length === 1) {
+                const selected = tracks[0];
+                track = {
+                    url: selected.url,
+                    title: selected.title,
+                    requestedBy: member.user.tag,
+                    requestedById: userId,
+                    requestedByTag: member.user.tag,
+                    info: selected.info || {
+                        video_details: {
+                            title: selected.title,
+                            durationInSec: selected.durationMs ? selected.durationMs / 1000 : 0,
+                            thumbnails: selected.thumbnail ? [{ url: selected.thumbnail }] : []
+                        }
+                    }
+                };
+            }
+
+            const result = await enqueueTrack(voiceChannel, track, {
+                textChannelId: channelId
+            });
+
+            if (result.error) return result;
+
+            return {
+                success: true,
+                status: result.started ? "playing" : "queued",
+                title: track.title,
+                position: result.position
+            };
+        }
     } catch (error) {
         logger.error(`Error in platform.playMusic: ${error.message}`);
-        return { error: "Ada masalah teknis pas mau putar musik. Hmph!" };
+        return { error: `Ada masalah teknis: ${error.message}` };
     }
 }
 

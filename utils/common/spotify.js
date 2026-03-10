@@ -85,6 +85,7 @@ async function getSpotifyToken() {
     headers: {
       Authorization: `Basic ${credentials}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "yova-discord-bot-v1",
     },
     body,
   });
@@ -107,7 +108,10 @@ async function spotifyRequest(url) {
   const target = url.startsWith("http") ? url : `${SPOTIFY_API_BASE}${url}`;
 
   const response = await fetch(target, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "yova-discord-bot-v1"
+    },
   });
 
   if (response.status === 401) {
@@ -115,7 +119,10 @@ async function spotifyRequest(url) {
     cachedTokenExpiresAt = 0;
     const retryToken = await getSpotifyToken();
     const retryResponse = await fetch(target, {
-      headers: { Authorization: `Bearer ${retryToken}` },
+      headers: {
+        Authorization: `Bearer ${retryToken}`,
+        "User-Agent": "yova-discord-bot-v1"
+      },
     });
     if (!retryResponse.ok) {
       const data = await retryResponse.json().catch(() => ({}));
@@ -128,7 +135,14 @@ async function spotifyRequest(url) {
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    const error = new Error(data?.error?.message || "SPOTIFY_REQUEST_FAILED");
+    let message = data?.error?.message || "SPOTIFY_REQUEST_FAILED";
+
+    // Handle the specific "Active premium subscription required" error
+    if (response.status === 403 && (message.includes("premium") || JSON.stringify(data).includes("premium"))) {
+      message = "Spotify API sekarang mewajibkan akun Premium untuk pemilik App (Client ID) sesuai update Februari 2026 (https://developer.spotify.com/blog/2026-02-06-update-on-developer-access-and-platform-security). Silakan upgrade akun Spotify di Spotify Developer Dashboard atau gunakan judul lagu saja tanpa URL.";
+    }
+
+    const error = new Error(message);
     error.status = response.status;
     throw error;
   }
@@ -320,12 +334,12 @@ async function resolveSpotifyTrackToYoutube(track) {
     const videoId =
       (typeof cached.youtubeUrl === "string" && cached.youtubeUrl.includes("youtube"))
         ? (() => {
-            try {
-              return play.extractID(cached.youtubeUrl);
-            } catch (error) {
-              return null;
-            }
-          })()
+          try {
+            return play.extractID(cached.youtubeUrl);
+          } catch (error) {
+            return null;
+          }
+        })()
         : null;
     return {
       url: cached.youtubeUrl,
