@@ -54,6 +54,15 @@ function computeTypingDelay(text) {
   return clamp(delay, cfg.minMs, cfg.maxTotalMs);
 }
 
+async function safeSendTyping(channel) {
+  try {
+    if (!channel?.sendTyping) return;
+    await channel.sendTyping();
+  } catch (error) {
+    // Best-effort only; failures (timeouts, missing perms, etc) should not break message handling.
+  }
+}
+
 async function waitWithTyping(channel, text) {
   if (!channel?.sendTyping) return;
   const cfg = getTypingConfig();
@@ -65,11 +74,11 @@ async function waitWithTyping(channel, text) {
   const interval = clamp(cfg.intervalMs, 2000, 9000);
   let remaining = delay;
 
-  await channel.sendTyping();
+  await safeSendTyping(channel);
   while (remaining > interval) {
     await new Promise((resolve) => setTimeout(resolve, interval));
     remaining -= interval;
-    await channel.sendTyping();
+    await safeSendTyping(channel);
   }
   if (remaining > 0) {
     await new Promise((resolve) => setTimeout(resolve, Math.max(1, remaining)));

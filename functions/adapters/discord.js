@@ -178,7 +178,7 @@ async function handleDiscordMessage(message, prompt, options = {}) {
             }
 
             // Use waitWithTyping to simulate natural delay based on length
-            await waitWithTyping(message.channel, replyPayload.content);
+            await waitWithTyping(message.channel, replyPayload.content).catch(() => { });
 
             const voiceReply = await maybeHandleVoiceReply(
                 message,
