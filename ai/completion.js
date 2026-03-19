@@ -562,8 +562,11 @@ async function chatCompletion({
 
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${googleApiKey}`;
             const isGemmaModel = currentModel.toLowerCase().includes('gemma');
+            // IMPORTANT: Never mutate the shared `filteredContents` across retries.
+            // Gemma wrapping below rewrites the first user message; without cloning, retries will keep nesting SYSTEM_INSTRUCTION.
+            const attemptContents = JSON.parse(JSON.stringify(filteredContents || []));
             const body = {
-                contents: filteredContents, // Use filtered contents
+                contents: attemptContents,
                 generationConfig: {
                     temperature: finalTemperature,
                     maxOutputTokens: maxTokens
@@ -601,7 +604,13 @@ async function chatCompletion({
                     const firstMsg = body.contents[0];
                     if (firstMsg.role === 'user' && firstMsg.parts && firstMsg.parts[0]) {
                         // Concatenate with existing first user message
-                        body.contents[0].parts[0].text = `SYSTEM_INSTRUCTION:\n${systemText}\n\nUSER_REQUEST:\n${firstMsg.parts[0].text}`;
+                        const rawFirstText = String(firstMsg.parts[0].text || "");
+                        const marker = "\n\nUSER_REQUEST:\n";
+                        const userRequestText =
+                            rawFirstText.startsWith("SYSTEM_INSTRUCTION:") && rawFirstText.includes(marker)
+                                ? rawFirstText.split(marker).slice(1).join(marker)
+                                : rawFirstText;
+                        body.contents[0].parts[0].text = `SYSTEM_INSTRUCTION:\n${systemText}\n\nUSER_REQUEST:\n${userRequestText}`;
                     } else {
                         // Prepend a new user message for instructions if history starts with model/assistant
                         body.contents.unshift({
