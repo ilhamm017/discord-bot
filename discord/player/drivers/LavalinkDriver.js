@@ -5,6 +5,7 @@ const {
     primeMyInstantsTrack,
     primeYoutubeTrack,
 } = require("../../../utils/common/media_cache");
+const { recordYoutubeCookiesIssue } = require("../youtube_auth");
 
 class LavalinkDriver {
     type = "lavalink";
@@ -181,6 +182,9 @@ class LavalinkDriver {
                     url: track?.originalUrl || track?.url || null,
                     videoId: track?.youtubeVideoId || null,
                     message: error?.message || String(error),
+                });
+                await recordYoutubeCookiesIssue(guildId, track, error, {
+                    client: voiceChannel?.client || voiceChannel?.guild?.client || null,
                 });
             }
         }

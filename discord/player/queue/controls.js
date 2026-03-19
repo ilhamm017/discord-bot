@@ -8,6 +8,7 @@ const {
     primeMyInstantsTrack,
     primeYoutubeTrack,
 } = require("../../../utils/common/media_cache");
+const { recordYoutubeCookiesIssue } = require("../youtube_auth");
 
 
 async function shuffleQueue(guildId) {
@@ -90,6 +91,9 @@ async function enqueueTracks(voiceChannel, tracks, options = {}) {
                 cacheKey: track?.cacheKey || null,
                 message: error?.message || String(error),
             });
+            recordYoutubeCookiesIssue(voiceChannel.guild.id, track, error, {
+                client: voiceChannel?.client || voiceChannel?.guild?.client || null,
+            }).catch(() => { });
         });
     }
 

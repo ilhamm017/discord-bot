@@ -33,6 +33,7 @@ function getPlayHistoryLimit() {
     return Math.min(bounded, 1000);
 }
 const AUTH_FAILURE_COOLDOWN_MS = 90 * 1000;
+const YOUTUBE_AUTH_SIGNAL_WINDOW_MS = 10 * 60 * 1000;
 
 function cloneTrackForHistory(track) {
     if (!track || typeof track !== "object") return null;
@@ -241,9 +242,14 @@ async function playIndex(state, index, options = {}) {
         } catch (error) {
             const failedTrack = queue[currentIndex];
             lastError = error;
+            const sawRecentYoutubeAuthSignal =
+                Number.isFinite(Number(state.youtubeAuthDetectedAt)) &&
+                Date.now() - Number(state.youtubeAuthDetectedAt) < YOUTUBE_AUTH_SIGNAL_WINDOW_MS;
+            const isLavalinkNoTracksFailure =
+                /no tracks found via lavalink/i.test(String(error?.message || ""));
             const isYoutubeAuthFailure =
                 failedTrack?.source === "youtube" &&
-                isYoutubeCookiesError(error);
+                (isYoutubeCookiesError(error) || (isLavalinkNoTracksFailure && sawRecentYoutubeAuthSignal));
 
             if (isYoutubeAuthFailure) {
                 state.failedPlaybackByIndex = state.failedPlaybackByIndex || {};

@@ -4,22 +4,24 @@ const { selectModel, markRateLimited } = require("./model_selector");
 const { convertToolsToTextDescription } = require("./tools_to_text");
 const { getRateLimiter } = require("./rate_limiter");
 const { getConfiguredGroqKeys, pickNextKey, markKeyCooldown } = require("./groq_key_pool");
+const { getConfiguredGoogleKeys, pickNextKey: pickNextGoogleKey, markKeyCooldown: markGoogleKeyCooldown } = require("./google_key_pool");
 
 // Default tier for Gemma models
 const DEFAULT_TIER = "balanced";
 
 function getConfig() {
-let config = {};
-try {
-        config = require("../config/index.js")();
-} catch (error) {
-        config = {};
-}
+	let config = {};
+	try {
+	        config = require("../config/index.js")();
+	} catch (error) {
+	        config = {};
+	}
 
     const googleApiKey =
         config.google_api_key ||
         config.googleApiKey ||
         process.env.GOOGLE_API_KEY;
+    const googleApiKeys = getConfiguredGoogleKeys(config, process.env);
 
     const groqApiKey =
         config.groq_api_key ||
@@ -28,7 +30,7 @@ try {
 
     const groqApiKeys = getConfiguredGroqKeys(config, process.env);
 
-    return { googleApiKey, groqApiKey, groqApiKeys, config };
+    return { googleApiKey, googleApiKeys, groqApiKey, groqApiKeys, config };
 }
 
 function deepOmitKeys(value, keysToOmit) {
@@ -356,8 +358,8 @@ async function chatCompletion({
     temperature = 0.7,
     maxTokens = 250,
 }, options = {}) {
-    const { googleApiKey, groqApiKey, groqApiKeys, config } = getConfig();
-    const hasGoogleKey = Boolean(googleApiKey);
+    const { googleApiKey, googleApiKeys, groqApiKey, groqApiKeys, config } = getConfig();
+    const hasGoogleKey = Boolean(googleApiKey) || (Array.isArray(googleApiKeys) && googleApiKeys.length > 0);
     const hasGroqKey = Boolean(groqApiKey) || (Array.isArray(groqApiKeys) && groqApiKeys.length > 0);
     if (!hasGoogleKey && !hasGroqKey) {
         throw new Error("AI_API_KEY_MISSING: Please add google_api_key or groq_api_key to config.json");
@@ -549,6 +551,13 @@ async function chatCompletion({
             throw new Error("GOOGLE_API_KEY_MISSING: Google provider is unavailable.");
         }
 
+        const configuredGoogleKeys = Array.isArray(googleApiKeys) && googleApiKeys.length > 0
+            ? googleApiKeys
+            : (googleApiKey ? [googleApiKey] : []);
+        if (configuredGoogleKeys.length === 0) {
+            throw new Error("GOOGLE_API_KEY_MISSING: Google provider is unavailable.");
+        }
+
         let currentTier = tier;
         let lastError = null;
         const maxAttempts = 4;
@@ -560,7 +569,8 @@ async function chatCompletion({
 
             if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
 
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${googleApiKey}`;
+            const activeGoogleKey = pickNextGoogleKey(configuredGoogleKeys) || configuredGoogleKeys[0];
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${activeGoogleKey}`;
             const isGemmaModel = currentModel.toLowerCase().includes('gemma');
             // IMPORTANT: Never mutate the shared `filteredContents` across retries.
             // Gemma wrapping below rewrites the first user message; without cloning, retries will keep nesting SYSTEM_INSTRUCTION.
@@ -635,9 +645,22 @@ async function chatCompletion({
                     const errorData = await response.json().catch(() => ({}));
                     logger.error(`[GOOGLE_ERROR_RESPONSE]: ${JSON.stringify(errorData, null, 2)}`);
                     const errorMessage = errorData.error?.message || response.statusText;
+                    const reason = String(errorData.error?.details?.[0]?.reason || "");
 
-                    if ([429, 500, 503, 504].includes(response.status)) {
-                        markRateLimited(currentModel, response.status === 429 ? config.google_rate_limit_cooldown_ms : 60000);
+                    if (response.status === 429) {
+                        const cooldownMs = Number(config.google_rate_limit_cooldown_ms) || 300000;
+                        markGoogleKeyCooldown(activeGoogleKey, cooldownMs, "rate_limited");
+                        markRateLimited(currentModel, cooldownMs);
+                        continue;
+                    }
+
+                    if (response.status === 400 && /API_KEY_INVALID|API_KEY/i.test(reason || errorMessage)) {
+                        markGoogleKeyCooldown(activeGoogleKey, 24 * 60 * 60 * 1000, "api_key_invalid");
+                        continue;
+                    }
+
+                    if ([500, 503, 504].includes(response.status)) {
+                        markRateLimited(currentModel, 60000);
                         visitedTiers.add(currentTier);
                         currentTier = getNextFallbackTier(currentTier, visitedTiers);
                         continue;

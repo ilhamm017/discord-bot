@@ -75,6 +75,17 @@ function createTextInput(type, value, secret) {
 }
 
 function createValueEditor(key, value) {
+    if (/_api_keys$/i.test(String(key || ""))) {
+        const inputEl = document.createElement("textarea");
+        if (Array.isArray(value)) {
+            inputEl.value = value.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+        } else {
+            inputEl.value = value == null ? "" : String(value);
+        }
+        inputEl.placeholder = "Satu key per baris (atau pisahkan dengan koma).";
+        return { kind: "multiline", element: inputEl, inputEl };
+    }
+
     const kind = classifyValue(value);
     let inputEl;
 
@@ -329,7 +340,19 @@ function readEditorValue(key, editor) {
     }
 
     if (editor.kind === "string" || editor.kind === "multiline") {
-        return String(editor.inputEl.value);
+        const raw = String(editor.inputEl.value);
+        if (/_api_keys$/i.test(String(key || ""))) {
+            const trimmed = raw.trim();
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (Array.isArray(parsed)) return parsed;
+                } catch {
+                    // fall back to string
+                }
+            }
+        }
+        return raw;
     }
 
     try {

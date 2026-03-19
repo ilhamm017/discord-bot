@@ -42,12 +42,16 @@ const CONFIG_DEFAULTS = {
     terminal_log_level: "info",
     log_to_stdout: true,
     music_search_timeout_ms: 20000,
+    google_api_keys: "",
+    groq_api_keys: "",
 };
 const CONFIG_FIELD_NOTES = {
     log_level: "Level log utama Yova. Nilai ini menjadi batas minimum logger untuk file log dan event internal.",
     terminal_log_level: "Level log yang tampil di terminal atau `docker compose logs`. Pilihan umum: debug, info, warn, error.",
     log_to_stdout: "Jika aktif, log Yova dikirim juga ke stdout sehingga terlihat di terminal/docker.",
     music_search_timeout_ms: "Batas waktu pencarian YouTube/Spotify sebelum dianggap terlalu lambat. Naikkan nilai ini jika search sering timeout di servermu.",
+    google_api_keys: "Opsional: beberapa Google AI Studio API key untuk rollover otomatis saat invalid/rate limit. Isi bisa multi-line (1 key per baris) atau dipisah koma.",
+    groq_api_keys: "Opsional: beberapa Groq API key untuk rollover otomatis saat rate limit. Isi bisa multi-line (1 key per baris) atau dipisah koma.",
 };
 
 const JSON_HEADERS = {
