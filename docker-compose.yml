@@ -28,7 +28,7 @@ services:
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
       YTDLP_COOKIES_PATH: ${YTDLP_COOKIES_PATH:-}
     ports:
-      - "3210:3210"
+      - "127.0.0.1:3210:3210"
     volumes:
       - ./config.json:/app/config.local.json
       - ./database.sqlite:/app/database.sqlite

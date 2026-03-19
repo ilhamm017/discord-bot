@@ -10,6 +10,7 @@ const {
     markYoutubeTrack,
     primeYoutubeTrack,
 } = require("../../../../utils/common/media_cache");
+const { getYoutubeUserFacingError } = require("../../../../utils/common/youtube_error");
 const { buildSearchSelect, shouldAutoPlaySearchQuery } = require("./utils");
 
 let config = {};
@@ -157,15 +158,23 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
     } else {
         // 3. Search
         let youtubeItems = [];
+        let youtubeSearchError = null;
         try {
             youtubeItems = await searchYoutube(query, YT_SEARCH_LIMIT);
         } catch (error) {
+            youtubeSearchError = error;
             logger.warn("YouTube search failed.", error);
         }
 
         const combined = [...youtubeItems].slice(0, SEARCH_OPTION_LIMIT);
 
         if (combined.length === 0) {
+            if (youtubeSearchError) {
+                const userFacing = getYoutubeUserFacingError(youtubeSearchError);
+                if (userFacing) {
+                    return message.reply(userFacing);
+                }
+            }
             return message.reply("Tidak menemukan hasil untuk judul itu.");
         }
 

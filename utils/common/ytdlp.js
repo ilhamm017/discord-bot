@@ -190,75 +190,92 @@ async function searchWithYtDlp(query, limit = 5) {
     if (!query) return [];
     const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 25));
     const binary = await ensureBinary();
-    const baseArgs = appendYoutubeJsRuntimeArgs([
-        `ytsearch${safeLimit}:${query}`,
-        "--no-playlist",
-        "--skip-download",
-        "--force-ipv4",
-        "--dump-json",
-        "--no-warnings",
-        "--no-progress",
-        "-q",
-    ], "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-    const { args, cleanup } = prepareCookiesArgs(baseArgs);
+    const baseArgs = appendYoutubeJsRuntimeArgs(
+        [
+            `ytsearch${safeLimit}:${query}`,
+            "--no-playlist",
+            "--skip-download",
+            "--force-ipv4",
+            "--dump-json",
+            "--no-warnings",
+            "--no-progress",
+            "-q",
+        ],
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    );
 
-    return new Promise((resolve, reject) => {
-        const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
-        let stdout = "";
-        let stderr = "";
+    const runOnce = async (binaryPath, allowRefresh = true) => {
+        const { args, cleanup } = prepareCookiesArgs(baseArgs);
 
-        child.stdout.on("data", (chunk) => {
-            stdout += chunk.toString();
-        });
+        try {
+            return await new Promise((resolve, reject) => {
+                const child = spawn(binaryPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+                let stdout = "";
+                let stderr = "";
 
-        child.stderr.on("data", (chunk) => {
-            stderr += chunk.toString();
-        });
+                child.stdout.on("data", (chunk) => {
+                    stdout += chunk.toString();
+                });
 
-        child.on("error", (error) => {
-            cleanup();
-            reject(error);
-        });
+                child.stderr.on("data", (chunk) => {
+                    stderr += chunk.toString();
+                });
 
-        child.on("close", (code) => {
-            cleanup();
-            if (code !== 0) {
-                const wrapped = new Error("YTDLP_SEARCH_FAILED");
-                wrapped.cause = new Error(stderr || `exit_${code}`);
-                wrapped.details = {
-                    code,
-                    stderr: stderr.trim() || null,
-                    stdout: stdout.trim() || null,
-                    query,
-                };
-                reject(wrapped);
-                return;
+                child.on("error", (error) => {
+                    cleanup();
+                    reject(error);
+                });
+
+                child.on("close", (code) => {
+                    cleanup();
+                    if (code !== 0) {
+                        const wrapped = new Error("YTDLP_SEARCH_FAILED");
+                        wrapped.cause = new Error(stderr || `exit_${code}`);
+                        wrapped.details = {
+                            code,
+                            stderr: stderr.trim() || null,
+                            stdout: stdout.trim() || null,
+                            query,
+                        };
+                        reject(wrapped);
+                        return;
+                    }
+
+                    const results = [];
+                    const lines = stdout.split(/\r?\n/).filter(Boolean);
+                    for (const line of lines) {
+                        try {
+                            const item = JSON.parse(line);
+                            if (!item) continue;
+                            const url =
+                                item.webpage_url ||
+                                item.url ||
+                                (item.id ? `https://www.youtube.com/watch?v=${item.id}` : null);
+                            if (!url) continue;
+                            results.push({
+                                id: item.id,
+                                url,
+                                title: item.title || url,
+                                duration: Number.isFinite(item.duration) ? item.duration : null,
+                            });
+                        } catch (error) {
+                            continue;
+                        }
+                    }
+                    resolve(results);
+                });
+            });
+        } catch (error) {
+            if (allowRefresh && shouldRefreshBinaryOnError(error)) {
+                await refreshBinary();
+                const refreshedBinary = await ensureBinary();
+                return runOnce(refreshedBinary, false);
             }
+            throw error;
+        }
+    };
 
-            const results = [];
-            const lines = stdout.split(/\r?\n/).filter(Boolean);
-            for (const line of lines) {
-                try {
-                    const item = JSON.parse(line);
-                    if (!item) continue;
-                    const url =
-                        item.webpage_url ||
-                        item.url ||
-                        (item.id ? `https://www.youtube.com/watch?v=${item.id}` : null);
-                    if (!url) continue;
-                    results.push({
-                        id: item.id,
-                        url,
-                        title: item.title || url,
-                        duration: Number.isFinite(item.duration) ? item.duration : null,
-                    });
-                } catch (error) {
-                    continue;
-                }
-            }
-            resolve(results);
-        });
-    });
+    return runOnce(binary, true);
 }
 
 async function getInfoWithYtDlp(url, options = {}) {

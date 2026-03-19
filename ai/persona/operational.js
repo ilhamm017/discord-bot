@@ -2,6 +2,7 @@ const OPERATIONAL_RULES = `
 Aturan operasional:
 1) Tentukan apakah perlu tool atau cukup jawaban langsung.
 2) Untuk data server/member/musik, gunakan tool yang tersedia; jangan mengarang.
+3) Untuk info eksternal/real-time (berita, harga, cuaca, tanggal event/kalender seperti 1 Syawal/Idul Fitri), gunakan tool searchWeb atau browserosSearch (dan browserosFetchPage jika perlu).
 3) Untuk aksi ke user lain (mis. kirim pesan, putar lagu untuk orang lain), gunakan tool yang tepat.
 4) Jika hanya chat santai tanpa aksi, jawab langsung (type: final).
 5) Gunakan hanya tool yang terdaftar; jika tidak ada, jangan memanggil tool.

@@ -74,6 +74,9 @@ function analyzeComplexity(prompt, options = {}) {
     const musicRegex = /\b(putar|putarkan|puter|putarin|puterin|play|setel|mainkan|lagu|music|nyanyi|dengar|skip|stop|pause|resume|next|prev|queue|antrian|lirik|lyric|song|track|mp3|playlist|shuffle|loop|repeat|semangat|mood|temani|audio|sound\s*effect|soundboard|sfx|efek\s+suara|myinstants?)\b/i;
     const searchRegex = /\b(cari|cariin|search|google|berita|terbaru|apa itu|siapa itu|crypto|harga|cuaca|weather|info|news|fakta|fact|definisi|artinya|kurs|saham|stock|internet)\b/i;
     const factualWhoRegex = /\bsiapa\b.*\b(presiden|menteri|ceo|pendiri|penemu|aktor|penyanyi|ibukota|ibu kota|negara|kota|tokoh)\b/i;
+    const calendarWhenRegex = /\b(kapan|tanggal\s+berapa|tgl\s+berapa|jatuh\s+(pada|di)\s+tanggal|hari\s+apa)\b/i;
+    const hijriHolidayRegex = /\b(syawal|ramadhan|ramadan|idul\s*fitri|lebaran|idul\s*adha|zulhijah|dzulhijah|muharram|maulid|isra'?\\s*mi'raj|nisfu\\s*sya'?ban|puasa|imsak|tarawih)\b/i;
+    const explicitYearRegex = /\b20\d{2}\b/;
     const historyRegex = /\b(chat|pesan|tadi|bahas apa|ngomong apa|riwayat|history|kemarin|tadi pagi|semalam|barusan|last message|msg|context|konteks|sebelumnya|dulu|salah|kesalahan|kenapa|ngapain|ringkas|ringkasan|rangkum|rangkuman|merangkum|summary|summarize)\b/i;
     const memberRegex = /\b(profil|role|pangkat|member|user|anggota|daftar member|lokasi member|jejak member|jointime|avatar|pfp|pp|foto profil|status member|activity|siapa saja|ada siapa|jumlah member|username)\b/i;
     const memberContextRegex = /\bsiapa\b.*\b(member|anggota|online|di server|di sini)\b/i;
@@ -165,8 +168,12 @@ function analyzeComplexity(prompt, options = {}) {
     const needsMentions = /(@|mention|panggil|tentang)/i.test(normalizedPrompt);
 
     const isMusic = musicRegex.test(normalizedPrompt);
+    const looksLikeCalendarQuery =
+        calendarWhenRegex.test(normalizedPrompt) &&
+        (hijriHolidayRegex.test(normalizedPrompt) || explicitYearRegex.test(normalizedPrompt));
+
     let isSearch =
-        (searchRegex.test(normalizedPrompt) || factualWhoRegex.test(normalizedPrompt)) &&
+        (searchRegex.test(normalizedPrompt) || factualWhoRegex.test(normalizedPrompt) || looksLikeCalendarQuery) &&
         !/\b(kamu|aku|kita)\b/i.test(normalizedPrompt); // Avoid searching for users/persona
     const isMember = memberRegex.test(normalizedPrompt) || memberContextRegex.test(normalizedPrompt);
     const isMod = modRegex.test(normalizedPrompt);

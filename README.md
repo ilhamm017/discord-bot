@@ -79,7 +79,7 @@ Catatan:
 - Compose ini memakai satu container aplikasi agar tombol restart Lavalink dari panel web tetap berfungsi.
 - Binary Lavalink dan Java tidak lagi perlu disimpan di repo; image Docker akan mengunduh Lavalink saat build dan memakai Java dari image.
 - Compose hanya bind-mount file runtime penting seperti `config.json`, `.data/`, `database.sqlite`, log, dan `lavalink/application.yml`, jadi binary Lavalink bawaan image tidak ketimpa mount host.
-- Jika ingin mengunci panel web, set env `CONFIG_WEB_TOKEN` sebelum menjalankan compose.
+- Panel config di Docker hanya di-bind ke `127.0.0.1` (tidak terbuka ke LAN). Namun token `CONFIG_WEB_TOKEN` tetap **wajib** diset saat menjalankan di Docker/production.
 - Setelah ada perubahan kode bot, rebuild image dengan `docker compose up -d --build`.
 - Jika pencarian lagu terasa terlalu cepat timeout, naikkan `music_search_timeout_ms` dari panel config atau `config.json`.
 - Untuk fitur browsing/search berbasis Chromium (Playwright), image akan mengunduh Chromium saat build.

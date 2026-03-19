@@ -5,9 +5,22 @@ const path = require("path");
 
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const LAVALINK_CONFIG_PATH = path.join(ROOT_DIR, "lavalink", "application.yml");
-const LAVALINK_CONFIG_BACKUP_DIR = process.env.LAVALINK_CONFIG_BACKUP_DIR
-    ? path.resolve(ROOT_DIR, process.env.LAVALINK_CONFIG_BACKUP_DIR)
-    : path.dirname(LAVALINK_CONFIG_PATH);
+const DATA_DIR = path.join(ROOT_DIR, ".data");
+const DEFAULT_LAVALINK_CONFIG_BACKUP_DIR = path.join(DATA_DIR, "lavalink-config-backups");
+
+function resolveDirUnderRoot(envValue, fallbackPath) {
+    if (!envValue) return fallbackPath;
+    const candidate = path.resolve(ROOT_DIR, String(envValue));
+    const rootPrefix = `${ROOT_DIR}${path.sep}`;
+    if (candidate === ROOT_DIR || candidate.startsWith(rootPrefix)) return candidate;
+    console.warn(`[config-web] Unsafe path rejected for lavalink backup dir: ${envValue}. Falling back to ${fallbackPath}`);
+    return fallbackPath;
+}
+
+const LAVALINK_CONFIG_BACKUP_DIR = resolveDirUnderRoot(
+    process.env.LAVALINK_CONFIG_BACKUP_DIR,
+    DEFAULT_LAVALINK_CONFIG_BACKUP_DIR
+);
 
 const MANAGED_LAVALINK_FIELDS = [
     {

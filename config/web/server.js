@@ -11,9 +11,8 @@ const CONFIG_PATH = typeof configModule.getConfigFilePath === "function"
     : path.join(ROOT_DIR, "config.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATA_DIR = path.join(ROOT_DIR, ".data");
-const CONFIG_BACKUP_DIR = process.env.CONFIG_BACKUP_DIR
-    ? path.resolve(ROOT_DIR, process.env.CONFIG_BACKUP_DIR)
-    : ROOT_DIR;
+const DEFAULT_CONFIG_BACKUP_DIR = path.join(DATA_DIR, "config-backups");
+const CONFIG_BACKUP_DIR = resolveDirUnderRoot(process.env.CONFIG_BACKUP_DIR, DEFAULT_CONFIG_BACKUP_DIR);
 const COOKIE_UPLOAD_PATH = path.join(DATA_DIR, "cookies.txt");
 const {
     readManagedLavalinkConfig,
@@ -36,6 +35,8 @@ const HOST = process.env.CONFIG_WEB_HOST || "127.0.0.1";
 const PORT = Number(process.env.CONFIG_WEB_PORT || 3210);
 const ACCESS_TOKEN = process.env.CONFIG_WEB_TOKEN || "";
 const MAX_BODY_BYTES = 1024 * 1024;
+const REQUIRE_TOKEN = String(process.env.CONFIG_WEB_REQUIRE_TOKEN || "").trim().toLowerCase() !== "false"
+    && (process.env.NODE_ENV === "production" || !isLoopbackHost(HOST));
 const CONFIG_DEFAULTS = {
     log_level: "debug",
     terminal_log_level: "info",
@@ -52,6 +53,33 @@ const CONFIG_FIELD_NOTES = {
 const JSON_HEADERS = {
     "Content-Type": "application/json; charset=utf-8",
 };
+
+function isLoopbackHost(host) {
+    const normalized = String(host || "").trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === "localhost" || normalized === "::1") return true;
+    return normalized.startsWith("127.");
+}
+
+function isLoopbackRemoteAddress(address) {
+    const value = String(address || "").trim().toLowerCase();
+    if (!value) return false;
+    if (value === "::1" || value === "127.0.0.1") return true;
+    if (value.startsWith("::ffff:")) {
+        const tail = value.slice("::ffff:".length);
+        return tail.startsWith("127.");
+    }
+    return value.startsWith("127.");
+}
+
+function resolveDirUnderRoot(envValue, fallbackPath) {
+    if (!envValue) return fallbackPath;
+    const candidate = path.resolve(ROOT_DIR, String(envValue));
+    const rootPrefix = `${ROOT_DIR}${path.sep}`;
+    if (candidate === ROOT_DIR || candidate.startsWith(rootPrefix)) return candidate;
+    console.warn(`[config-web] Unsafe path rejected for backup dir: ${envValue}. Falling back to ${fallbackPath}`);
+    return fallbackPath;
+}
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -201,7 +229,12 @@ async function getElevenLabsUsageStatus(config = readConfig()) {
 }
 
 function sendJson(res, status, data) {
-    res.writeHead(status, JSON_HEADERS);
+    res.writeHead(status, {
+        ...JSON_HEADERS,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    });
     res.end(JSON.stringify(data));
 }
 
@@ -211,7 +244,12 @@ function sendFile(res, filePath, contentType) {
             sendJson(res, 500, { ok: false, error: "Failed to read static file." });
             return;
         }
-        res.writeHead(200, { "Content-Type": `${contentType}; charset=utf-8` });
+        res.writeHead(200, {
+            "Content-Type": `${contentType}; charset=utf-8`,
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        });
         res.end(content);
     });
 }
@@ -222,7 +260,10 @@ function getTokenFromHeaders(req) {
 }
 
 function isAuthorized(req) {
-    if (!ACCESS_TOKEN) return true;
+    if (!ACCESS_TOKEN) {
+        if (!REQUIRE_TOKEN) return true;
+        return isLoopbackHost(HOST) && isLoopbackRemoteAddress(req.socket?.remoteAddress);
+    }
     return getTokenFromHeaders(req) === ACCESS_TOKEN;
 }
 
@@ -278,7 +319,7 @@ const server = http.createServer(async (req, res) => {
                 ok: true,
                 host: HOST,
                 port: PORT,
-                protected: Boolean(ACCESS_TOKEN),
+                protected: Boolean(ACCESS_TOKEN) || REQUIRE_TOKEN,
             });
             return;
         }
@@ -399,7 +440,13 @@ const server = http.createServer(async (req, res) => {
             }
 
             const rawBody = await collectBody(req);
-            const parsed = rawBody ? JSON.parse(rawBody) : {};
+            let parsed = {};
+            try {
+                parsed = rawBody ? JSON.parse(rawBody) : {};
+            } catch {
+                sendJson(res, 400, { ok: false, error: "Invalid JSON payload." });
+                return;
+            }
 
             if (!isPlainObject(parsed) || !isPlainObject(parsed.config)) {
                 sendJson(res, 400, { ok: false, error: "Invalid payload. Expected { config: {...} }" });
@@ -422,7 +469,13 @@ const server = http.createServer(async (req, res) => {
             }
 
             const rawBody = await collectBody(req);
-            const parsed = rawBody ? JSON.parse(rawBody) : {};
+            let parsed = {};
+            try {
+                parsed = rawBody ? JSON.parse(rawBody) : {};
+            } catch {
+                sendJson(res, 400, { ok: false, error: "Invalid JSON payload." });
+                return;
+            }
             const filename =
                 typeof parsed.filename === "string" ? parsed.filename.trim() : "";
             const content =
@@ -464,7 +517,13 @@ const server = http.createServer(async (req, res) => {
             }
 
             const rawBody = await collectBody(req);
-            const parsed = rawBody ? JSON.parse(rawBody) : {};
+            let parsed = {};
+            try {
+                parsed = rawBody ? JSON.parse(rawBody) : {};
+            } catch {
+                sendJson(res, 400, { ok: false, error: "Invalid JSON payload." });
+                return;
+            }
             if (!isPlainObject(parsed) || !isPlainObject(parsed.config)) {
                 sendJson(res, 400, { ok: false, error: "Invalid payload. Expected { config: {...} }" });
                 return;
@@ -504,13 +563,13 @@ const server = http.createServer(async (req, res) => {
 
 async function startServer() {
     await connectDB();
+    if (REQUIRE_TOKEN && !ACCESS_TOKEN) {
+        throw new Error("CONFIG_WEB_TOKEN is required when config-web is exposed (set CONFIG_WEB_TOKEN, or set CONFIG_WEB_REQUIRE_TOKEN=false for local-only use).");
+    }
     server.listen(PORT, HOST, () => {
         console.log(`[config-web] running on http://${HOST}:${PORT}`);
-        if (!ACCESS_TOKEN) {
-            console.log("[config-web] token auth: OFF (localhost-only by default)");
-        } else {
-            console.log("[config-web] token auth: ON (use header x-config-token)");
-        }
+        if (!ACCESS_TOKEN) console.log("[config-web] token auth: OFF");
+        else console.log("[config-web] token auth: ON (use header x-config-token)");
     });
 }
 

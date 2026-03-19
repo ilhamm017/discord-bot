@@ -27,4 +27,4 @@ Opsional keamanan token:
 CONFIG_WEB_TOKEN=rahasia npm run config:web
 ```
 
-Jika token aktif, request simpan harus kirim header `x-config-token`.
+Jika panel dibuka ke jaringan (misal `CONFIG_WEB_HOST=0.0.0.0` / jalan di Docker), token **wajib** diset. Jika token aktif, request harus kirim header `x-config-token`.

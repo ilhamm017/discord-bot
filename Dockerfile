@@ -18,6 +18,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY package*.json ./
+ENV npm_config_build_from_source=true
 RUN npm ci
 
 # Playwright (Chromium) for server-side browsing/search

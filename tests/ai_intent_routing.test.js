@@ -73,6 +73,20 @@ const cases = [
     },
   },
   {
+    name: "Hijri calendar question should route to search",
+    input: "kapan 1 syawal 2026",
+    options: { messages: [] },
+    expect: {
+      intent: "search",
+      provider: "groq",
+      needsTool: true,
+      isAmbiguous: false,
+    },
+    includes: {
+      matchedIntents: ["search"],
+    },
+  },
+  {
     name: "Summary question should route to history tools",
     input: "apa rangkumannya ?",
     options: {
