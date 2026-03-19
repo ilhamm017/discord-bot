@@ -3,6 +3,7 @@ const { analyzeComplexity } = require("./complexity_analyzer");
 const { selectModel, markRateLimited } = require("./model_selector");
 const { convertToolsToTextDescription } = require("./tools_to_text");
 const { getRateLimiter } = require("./rate_limiter");
+const { getConfiguredGroqKeys, pickNextKey, markKeyCooldown } = require("./groq_key_pool");
 
 // Default tier for Gemma models
 const DEFAULT_TIER = "balanced";
@@ -25,7 +26,62 @@ function getConfig() {
         config.groqApiKey ||
         process.env.GROQ_API_KEY;
 
-    return { googleApiKey, groqApiKey, config };
+    const groqApiKeys = getConfiguredGroqKeys(config, process.env);
+
+    return { googleApiKey, groqApiKey, groqApiKeys, config };
+}
+
+function deepOmitKeys(value, keysToOmit) {
+    if (Array.isArray(value)) return value.map(v => deepOmitKeys(v, keysToOmit));
+    if (!value || typeof value !== "object") return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+        if (keysToOmit.has(k)) continue;
+        out[k] = deepOmitKeys(v, keysToOmit);
+    }
+    return out;
+}
+
+function minifyOpenAITools(tools, config) {
+    if (!Array.isArray(tools) || tools.length === 0) return tools;
+    const mode = String(config?.ai_tool_schema_mode || "compact").toLowerCase();
+    if (mode === "full") return tools;
+
+    const omit = new Set(["description", "title", "examples", "default"]);
+
+    return tools.map(t => {
+        if (!t || typeof t !== "object") return t;
+        if (t.type !== "function" || !t.function) return t;
+
+        const fn = t.function;
+        const clean = {
+            type: "function",
+            function: {
+                name: fn.name,
+                parameters: deepOmitKeys(fn.parameters || {}, omit),
+            },
+        };
+
+        if (mode !== "minimal") {
+            const desc = typeof fn.description === "string" ? fn.description.trim() : "";
+            if (desc) clean.function.description = desc.length > 160 ? `${desc.slice(0, 160)}…` : desc;
+        }
+
+        return clean;
+    });
+}
+
+function stripToolTags(tools) {
+    if (!Array.isArray(tools)) return tools;
+    return tools.map(t => {
+        if (!t || typeof t !== "object") return t;
+        if (t.function && typeof t.function === "object") {
+            const { tags, ...cleanFn } = t.function;
+            return { ...t, function: cleanFn };
+        }
+        const { tags, ...cleanTool } = t;
+        return cleanTool;
+    });
 }
 
 /**
@@ -117,7 +173,10 @@ function convertMessagesToGoogleFormat(messages, system) {
 function convertToolsToGoogleFormat(openaiTools) {
     if (!Array.isArray(openaiTools)) return undefined;
 
-    const functionDeclarations = openaiTools
+    const { config } = getConfig();
+    const prepared = minifyOpenAITools(openaiTools, config);
+
+    const functionDeclarations = prepared
         .filter(t => t.type === 'function' && t.function)
         .map(t => {
             // Google strict strictness on schemas, but mostly compatible.
@@ -160,21 +219,16 @@ async function callGroqAI(apiKey, model, params) {
     }
 
 
+    const { config } = getConfig();
+    const preparedTools = stripToolTags(minifyOpenAITools(params.tools, config));
+
     const body = {
         model: model,
         messages: messages,
         temperature: params.temperature,
         max_tokens: params.maxTokens,
-        // Strip tags from tools before sending to Groq
-        tools: Array.isArray(params.tools) ? params.tools.map(t => {
-            if (t.function) {
-                const { tags, ...cleanFn } = t.function;
-                return { ...t, function: cleanFn };
-            }
-            const { tags, ...cleanTool } = t;
-            return cleanTool;
-        }) : undefined,
-        tool_choice: params.tools ? "auto" : undefined,
+        tools: Array.isArray(preparedTools) ? preparedTools : undefined,
+        tool_choice: Array.isArray(preparedTools) && preparedTools.length > 0 ? "auto" : undefined,
     };
 
     // Groq Constraint: json_object cannot be used with tools/function calling
@@ -215,33 +269,33 @@ async function callGroqAI(apiKey, model, params) {
 /**
  * Filter tools based on detected intent to reduce prompt size
  */
+const INTENT_TAG_ALLOWLIST = {
+    'music': ['music'],
+    'search': ['web'],
+    'member': ['discord_member', 'memory'],
+    'moderation': ['discord_moderation'],
+    'reminder': ['reminder'],
+    'history': ['discord_message'],
+    'stats': ['system'],
+    'social': ['discord_messaging']
+};
+
+const INTENT_TOOL_NAME_ALLOWLIST = {
+    member: ['listMembers', 'getMemberById', 'getMemberByName', 'getUserProfile', 'setUserProfile', 'getUserMemory', 'setUserMemory', 'clearUserMemory', 'locateUser', 'findUserLocation', 'sendMessage', 'replyToMessage', 'getServerInfo'],
+    history: ['getRecentMessages', 'getMessagesBefore', 'getMessagesAfter', 'getMessagesAround', 'getMessageById', 'getLastMessageByUser', 'searchStoredMessages'],
+    moderation: ['deleteMessage', 'bulkDeleteMessages', 'timeoutMember', 'removeTimeout', 'banMember', 'unbanMember'],
+    reminder: ['createReminder', 'listUserReminders', 'cancelReminder'],
+    search: ['searchWeb'],
+    social: ['sendMessage', 'replyToMessage', 'sendAnnouncement', 'locateUser', 'findUserLocation', 'getServerInfo'],
+    music: ['playMusic', 'controlMusic', 'getMusicStatus', 'getRecentRuntimeIssues'],
+    stats: ['getAiStats', 'getServerInfo', 'getRecentRuntimeIssues']
+};
+
 function filterToolsByIntent(intent, tools) {
     if (!Array.isArray(tools)) return undefined;
 
-    const intentMap = {
-        'music': ['music'],
-        'search': ['web'],
-        'member': ['discord_member', 'memory'],
-        'moderation': ['discord_moderation'],
-        'reminder': ['reminder'],
-        'history': ['discord_message'],
-        'stats': ['system'],
-        'social': ['discord_messaging']
-    };
-
-    const intentToolAllowlist = {
-        member: ['listMembers', 'getMemberById', 'getMemberByName', 'getUserProfile', 'setUserProfile', 'getUserMemory', 'setUserMemory', 'clearUserMemory', 'locateUser', 'findUserLocation', 'sendMessage', 'replyToMessage', 'getServerInfo'],
-        history: ['getRecentMessages', 'getMessagesBefore', 'getMessagesAfter', 'getMessagesAround', 'getMessageById', 'getLastMessageByUser', 'searchStoredMessages'],
-        moderation: ['deleteMessage', 'bulkDeleteMessages', 'timeoutMember', 'removeTimeout', 'banMember', 'unbanMember'],
-        reminder: ['createReminder', 'listUserReminders', 'cancelReminder'],
-        search: ['searchWeb'],
-        social: ['sendMessage', 'replyToMessage', 'sendAnnouncement', 'locateUser', 'findUserLocation', 'getServerInfo'],
-        music: ['playMusic', 'controlMusic', 'getMusicStatus', 'getRecentRuntimeIssues'],
-        stats: ['getAiStats', 'getServerInfo', 'getRecentRuntimeIssues']
-    };
-
-    const allowedTags = intentMap[intent] || ['system'];
-    const allowlist = intentToolAllowlist[intent];
+    const allowedTags = INTENT_TAG_ALLOWLIST[intent] || ['system'];
+    const allowlist = INTENT_TOOL_NAME_ALLOWLIST[intent];
 
     let filtered;
     if (Array.isArray(allowlist)) {
@@ -259,6 +313,42 @@ function filterToolsByIntent(intent, tools) {
     return filtered.length > 0 ? filtered : undefined;
 }
 
+function filterToolsByIntents(intents, tools) {
+    if (!Array.isArray(tools)) return undefined;
+    const normalized = (Array.isArray(intents) ? intents : [intents])
+        .map(v => String(v || "").trim())
+        .filter(Boolean);
+    const uniqueIntents = [...new Set(normalized)];
+    if (uniqueIntents.length === 0) return undefined;
+
+    const allowedNames = new Set();
+    for (const intent of uniqueIntents) {
+        const allowlist = INTENT_TOOL_NAME_ALLOWLIST[intent];
+        if (Array.isArray(allowlist) && allowlist.length > 0) {
+            for (const name of allowlist) allowedNames.add(name);
+            continue;
+        }
+
+        const allowedTags = INTENT_TAG_ALLOWLIST[intent] || [];
+        if (allowedTags.length === 0) continue;
+        for (const t of tools) {
+            const tags = t.tags || (t.function && t.function.tags);
+            if (!tags || tags.length === 0) continue;
+            if (tags.some(tag => allowedTags.includes(tag))) {
+                const name = t.function?.name || t.name;
+                if (name) allowedNames.add(name);
+            }
+        }
+    }
+
+    if (allowedNames.size === 0) return undefined;
+    const filtered = tools.filter(t => {
+        const name = t.function?.name || t.name;
+        return name && allowedNames.has(name);
+    });
+    return filtered.length > 0 ? filtered : undefined;
+}
+
 async function chatCompletion({
     system,
     user,
@@ -266,9 +356,9 @@ async function chatCompletion({
     temperature = 0.7,
     maxTokens = 250,
 }, options = {}) {
-    const { googleApiKey, groqApiKey, config } = getConfig();
+    const { googleApiKey, groqApiKey, groqApiKeys, config } = getConfig();
     const hasGoogleKey = Boolean(googleApiKey);
-    const hasGroqKey = Boolean(groqApiKey);
+    const hasGroqKey = Boolean(groqApiKey) || (Array.isArray(groqApiKeys) && groqApiKeys.length > 0);
     if (!hasGoogleKey && !hasGroqKey) {
         throw new Error("AI_API_KEY_MISSING: Please add google_api_key or groq_api_key to config.json");
     }
@@ -299,6 +389,7 @@ async function chatCompletion({
         isReplyingToQuestion,
         isAmbiguous,
         routingConfidence,
+        matchedIntents,
     } = analyzeComplexity(currentUserMessage, {
         messages: inputMessages,
         tools: options.tools,
@@ -395,11 +486,21 @@ async function chatCompletion({
     let filteredTools;
     if (needsTool && Array.isArray(options.tools)) {
         if (isAmbiguous || routingConfidence < 0.65) {
-            filteredTools = options.tools;
-            logger.info(
-                `Contextual Tool Pruning bypassed (ambiguous=${!!isAmbiguous}, confidence=${Number(routingConfidence || 0).toFixed(2)}). ` +
-                `Keeping full toolset (${filteredTools.length} tools).`
-            );
+            const union = filterToolsByIntents(matchedIntents, options.tools);
+            if (union && union.length > 0) {
+                filteredTools = union;
+                logger.info(
+                    `Contextual Tool Pruning (union): ambiguous=${!!isAmbiguous}, confidence=${Number(routingConfidence || 0).toFixed(2)}, ` +
+                    `intents=${Array.isArray(matchedIntents) ? matchedIntents.join(",") : "unknown"}; ` +
+                    `kept ${filteredTools.length}/${options.tools.length} tools.`
+                );
+            } else {
+                filteredTools = options.tools;
+                logger.info(
+                    `Contextual Tool Pruning bypassed (ambiguous=${!!isAmbiguous}, confidence=${Number(routingConfidence || 0).toFixed(2)}). ` +
+                    `Keeping full toolset (${filteredTools.length} tools).`
+                );
+            }
         } else {
             filteredTools = filterToolsByIntent(intent, options.tools);
             if (filteredTools) {
@@ -493,7 +594,8 @@ async function chatCompletion({
                 if (filteredSystem && body.contents.length > 0) {
                     let systemText = filteredSystem.parts[0].text;
                     if (filteredTools) {
-                        systemText += "\n\nAVAILABLE TOOLS (You can use these):\n" + convertToolsToTextDescription(filteredTools);
+                        const compactTools = minifyOpenAITools(filteredTools, config);
+                        systemText += "\n\nAVAILABLE TOOLS (You can use these):\n" + convertToolsToTextDescription(compactTools);
                     }
 
                     const firstMsg = body.contents[0];
@@ -600,13 +702,63 @@ async function chatCompletion({
                 continue;
             }
 
+            const configuredKeys = Array.isArray(groqApiKeys) && groqApiKeys.length > 0
+                ? groqApiKeys
+                : (groqApiKey ? [groqApiKey] : []);
+
+            if (configuredKeys.length === 0) {
+                throw new Error("GROQ_API_KEY_MISSING: Groq provider is unavailable.");
+            }
+
             try {
-                const response = await callGroqAI(groqApiKey, groqModel, {
-                    system, user,
-                    messages: groqMessages,
-                    temperature: finalTemperature, maxTokens,
-                    tools: filteredTools
-                });
+                let lastKeyError = null;
+                let response = null;
+
+                // Roll keys on rate limit: if a key is 429'd, cool it down and try next key.
+                // Only if all keys are exhausted do we fall back tiers/models.
+                const maxKeySwaps = Math.max(1, configuredKeys.length);
+                for (let kAttempt = 0; kAttempt < maxKeySwaps; kAttempt++) {
+                    const selectedKey = pickNextKey(configuredKeys);
+                    if (!selectedKey) {
+                        const blockedKey = pickNextKey(configuredKeys, { allowBlocked: true });
+                        if (!blockedKey) break;
+                        // If all keys are blocked, stop trying keys and let outer logic handle fallback.
+                        break;
+                    }
+
+                    try {
+                        response = await callGroqAI(selectedKey, groqModel, {
+                            system, user,
+                            messages: groqMessages,
+                            temperature: finalTemperature, maxTokens,
+                            tools: filteredTools
+                        });
+                        lastKeyError = null;
+                        break;
+                    } catch (keyErr) {
+                        lastKeyError = keyErr;
+                        const msg = String(keyErr?.message || "").toLowerCase();
+                        const isRate = msg.includes("429") || msg.includes("rate limit") || msg.includes("tokens per minute");
+                        const isAuth = msg.includes("401") || msg.includes("403") || msg.includes("invalid api key") || msg.includes("unauthorized") || msg.includes("forbidden");
+
+                        if (isRate) {
+                            markKeyCooldown(selectedKey, 300000, "rate_limit");
+                            continue;
+                        }
+                        if (isAuth) {
+                            // Bad key: back off for a long time so we don't keep trying it.
+                            markKeyCooldown(selectedKey, 24 * 60 * 60 * 1000, "auth_error");
+                            continue;
+                        }
+
+                        // Not a key-specific limit/auth problem -> bubble up to tier fallback logic
+                        throw keyErr;
+                    }
+                }
+
+                if (!response) {
+                    throw lastKeyError || new Error("Groq request failed: no available API keys.");
+                }
 
                 // ADDITIONAL SAFETY: Verify Groq didn't hallucinate a tool NOT in the provided list
                 if (response && response.tool_calls) {

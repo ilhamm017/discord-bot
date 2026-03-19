@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const DOC_PATH = path.join(__dirname, "..", "docs", "BOT_HELP.md");
+const DOC_PATH = path.join(process.cwd(), "docs", "BOT_HELP.md");
 const MAX_MESSAGE_LENGTH = 1800;
 
 const DEFAULT_TEXT =
@@ -15,6 +15,24 @@ const DEFAULT_TEXT =
 
 let cachedText = null;
 let cachedMtimeMs = 0;
+
+function getPrefix() {
+  try {
+    // Read lazily so tests can set env/config before requiring this module.
+    // config.json is expected at repo root (process.cwd()).
+    // eslint-disable-next-line global-require
+    const config = require("../../config.json");
+    const prefix = typeof config?.prefix === "string" ? config.prefix.trim() : "";
+    return prefix || "yova";
+  } catch {
+    return "yova";
+  }
+}
+
+function applyPrefix(text, prefix) {
+  const safePrefix = typeof prefix === "string" && prefix.trim() ? prefix.trim() : "yova";
+  return String(text || "").replace(/\byova\b/g, safePrefix);
+}
 
 function loadDocText() {
   try {
@@ -32,7 +50,8 @@ function loadDocText() {
 }
 
 function getBotHelpText({ maxLength = MAX_MESSAGE_LENGTH } = {}) {
-  let text = loadDocText();
+  const prefix = getPrefix();
+  let text = applyPrefix(loadDocText(), prefix);
   if (text.length > maxLength) {
     text = text.slice(0, maxLength - 3).trimEnd() + "...";
   }
@@ -40,50 +59,57 @@ function getBotHelpText({ maxLength = MAX_MESSAGE_LENGTH } = {}) {
 }
 
 function answerBotQuestion(prompt) {
+  const prefix = getPrefix();
   const text = String(prompt || "").toLowerCase();
   if (!text) return getBotHelpText();
 
   if (text.includes("spotify")) {
-    return (
+    return applyPrefix(
       "Bisa untuk Spotify playlist saja. Pakai `yova play <link spotify playlist>`. " +
-      "Yova akan coba ambil daftar lagu dari playlist lalu cari versi YouTube per lagu dan masukkan ke antrian."
+      "Yova akan coba ambil daftar lagu dari playlist lalu cari versi YouTube per lagu dan masukkan ke antrian.",
+      prefix
     );
   }
-  if (text.includes("youtube") || text.includes("yt")) {
-    return (
+  if (/\byoutube\b/.test(text) || /\byt\b/.test(text)) {
+    return applyPrefix(
       "Bisa. Pakai `yova play <judul|url>` untuk YouTube/YouTube Music. " +
-      "Judul akan menampilkan list hasil YouTube."
+      "Judul akan menampilkan list hasil YouTube.",
+      prefix
     );
   }
   if (text.includes("panel") || text.includes("kontrol")) {
-    return "Ada panel kontrol. Pakai `yova kontrol` buat tombol play/pause/skip/repeat/queue.";
+    return applyPrefix(
+      "Ada panel kontrol. Pakai `yova kontrol` buat tombol play/pause/skip/repeat/queue.",
+      prefix
+    );
   }
   if (text.includes("queue") || text.includes("antrian")) {
     return "Queue ada. Bisa lihat di panel kontrol dan pilih lagu dari daftar antrian.";
   }
   if (text.includes("favorit") || text.includes("kesukaanku")) {
-    return "Ada favorit. Pakai `yova kesukaanku` atau `yova play kesukaanku`.";
+    return applyPrefix("Ada favorit. Pakai `yova kesukaanku` atau `yova play kesukaanku`.", prefix);
   }
   if (text.includes("ringkas") || text.includes("rangkum") || text.includes("summary")) {
-    return "Bisa ringkas channel. Pakai `yova ringkas [n]` atau `yova rangkum [n]`.";
+    return applyPrefix("Bisa ringkas channel. Pakai `yova ringkas [n]` atau `yova rangkum [n]`.", prefix);
   }
-  if (text.includes("ai") || text.includes("ucapkan")) {
-    return "AI bisa chat bebas atau `yova ucapkan <pesan> @user`.";
+  if (/\bai\b/.test(text) || text.includes("ucapkan")) {
+    return applyPrefix("AI bisa chat bebas atau `yova ucapkan <pesan> @user`.", prefix);
   }
   if (text.includes("panggil")) {
-    return "Bisa simpan panggilan. Pakai `yova panggil aku <nama>`.";
+    return applyPrefix("Bisa simpan panggilan. Pakai `yova panggil aku <nama>`.", prefix);
   }
   if (text.includes("join") || text.includes("voice")) {
-    return "Bisa join voice. Pakai `yova join <nama_channel|@user|default>`.";
+    return applyPrefix("Bisa join voice. Pakai `yova join <nama_channel|@user|default>`.", prefix);
   }
   if (text.includes("member") || text.includes("anggota")) {
-    return (
+    return applyPrefix(
       "Bisa cek member. Contoh: `yova member awal 5`, `yova member baru 5`, " +
-      "`yova member jumlah`, atau `yova cek member awal 5`."
+      "`yova member jumlah`, atau `yova cek member awal 5`.",
+      prefix
     );
   }
   if (text.includes("restore")) {
-    return "Bisa restore antrian. Pakai `yova restore`.";
+    return applyPrefix("Bisa restore antrian. Pakai `yova restore`.", prefix);
   }
   if (text.includes("log")) {
     return "Log disimpan di `logs/bot-YYYY-MM-DD.log`.";
@@ -95,7 +121,7 @@ function answerBotQuestion(prompt) {
 function isBotQuestion(prompt) {
   const text = String(prompt || "").toLowerCase();
   if (!text) return false;
-  const helpKeyword = /\b(fitur|perintah|command|menu|panduan|help)\b/.test(text);
+  const helpKeyword = /\b(fitur|perintah|command|commands|menu|panduan|help|cara pakai|cara pake|gimana pakai|gimana pake|how to use|usage)\b/.test(text);
   const featureKeyword =
     /\b(spotify|youtube|yt|panel|kontrol|queue|antrian|favorit|kesukaanku|ai|ucapkan|panggil|join|voice|restore|log|play|pause|skip|next|sebelumnya|stop|leave|shuffle|repeat|loop)\b/.test(
       text

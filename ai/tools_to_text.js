@@ -7,37 +7,31 @@ function convertToolsToTextDescription(tools) {
         return '';
     }
 
-    let description = '\n\n=====================\nAVAILABLE TOOLS\n=====================\n\n';
-    description += 'You have access to the following tools. To use a tool, respond with JSON in this format:\n';
-    description += '{"type": "tool_call", "name": "<tool_name>", "arguments": {<parameters>}}\n\n';
-    description += 'Available tools:\n\n';
+    let description = 'TOOLS (reply with JSON to call one):\n';
+    description += '{"type":"tool_call","name":"<tool_name>","arguments":{...}}\n\n';
 
     for (const tool of tools) {
         const func = tool.function;
         if (!func) continue;
 
-        description += `--- ${func.name} ---\n`;
-        description += `Description: ${func.description}\n`;
+        const name = func.name;
+        const shortDesc = typeof func.description === "string" ? func.description.trim() : "";
+        description += `- ${name}${shortDesc ? `: ${shortDesc}` : ""}\n`;
 
-        if (func.parameters && func.parameters.properties) {
-            description += 'Parameters:\n';
-            const props = func.parameters.properties;
-            const required = func.parameters.required || [];
-
-            for (const [paramName, paramDef] of Object.entries(props)) {
-                const isRequired = required.includes(paramName);
-                const requiredMark = isRequired ? ' (REQUIRED)' : ' (optional)';
-                description += `  - ${paramName}${requiredMark}: ${paramDef.type}`;
-                if (paramDef.description) {
-                    description += ` - ${paramDef.description}`;
-                }
-                if (paramDef.default !== undefined) {
-                    description += ` [default: ${paramDef.default}]`;
-                }
-                description += '\n';
+        const props = func.parameters?.properties;
+        if (props && typeof props === "object") {
+            const required = Array.isArray(func.parameters?.required) ? func.parameters.required : [];
+            const entries = Object.entries(props);
+            if (entries.length > 0) {
+                const parts = entries.map(([paramName, paramDef]) => {
+                    const isRequired = required.includes(paramName);
+                    const type = paramDef?.type || "any";
+                    const enumValues = Array.isArray(paramDef?.enum) ? ` enum=${paramDef.enum.join("|")}` : "";
+                    return `${paramName}${isRequired ? "!" : ""}:${type}${enumValues}`;
+                });
+                description += `  args: ${parts.join(", ")}\n`;
             }
         }
-        description += '\n';
     }
 
     return description;

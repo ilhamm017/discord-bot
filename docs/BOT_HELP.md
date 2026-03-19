@@ -10,6 +10,7 @@ Fitur utama:
 - Logging: tersimpan di file log harian.
 
 Perintah cepat:
+- yova help | yova cara pakai | yova jelaskan dirimu
 - yova play <judul|url|spotify_playlist>
 - yova play kesukaanku
 - yova kontrol

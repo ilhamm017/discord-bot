@@ -84,6 +84,9 @@ async function start() {
     setPanelUpdater((state) => updateControlPanel(client, state));
 
     try {
+        if (!token) {
+            throw new Error("DISCORD_TOKEN missing (set env DISCORD_TOKEN or config.json token).");
+        }
         await client.login(token);
 
         // Wait for client.user to be defined (Ready state)
@@ -96,6 +99,7 @@ async function start() {
         logger.info("Discord client started successfully.");
     } catch (error) {
         logger.error("Failed to login to Discord.", error);
+        throw error;
     }
 }
 

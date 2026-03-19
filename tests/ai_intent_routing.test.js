@@ -119,6 +119,23 @@ const cases = [
     },
   },
   {
+    name: "Music request with 'terbaru' modifier should stay music (no search ambiguity)",
+    input: "putarkan lagu taylor swift terbaru",
+    options: { messages: [] },
+    expect: {
+      intent: "music",
+      provider: "groq",
+      needsTool: true,
+      isAmbiguous: false,
+    },
+    includes: {
+      matchedIntents: ["music"],
+    },
+    min: {
+      routingConfidence: 0.8,
+    },
+  },
+  {
     name: "Direct mention social request should route to social",
     input: "panggil <@123> bilang halo",
     options: { messages: [] },
@@ -130,6 +147,22 @@ const cases = [
     },
     includes: {
       matchedIntents: ["social"],
+    },
+  },
+  {
+    name: "Moderation should take precedence over member intent",
+    input: "timeout member itu 10 menit",
+    options: { messages: [] },
+    expect: {
+      intent: "moderation",
+      provider: "groq",
+      needsTool: true,
+    },
+    includes: {
+      matchedIntents: ["moderation", "member"],
+    },
+    min: {
+      routingConfidence: 0.5,
     },
   },
   {

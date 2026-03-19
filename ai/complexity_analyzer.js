@@ -78,10 +78,10 @@ function analyzeComplexity(prompt, options = {}) {
     const memberRegex = /\b(profil|role|pangkat|member|user|anggota|daftar member|lokasi member|jejak member|jointime|avatar|pfp|pp|foto profil|status member|activity|siapa saja|ada siapa|jumlah member|username)\b/i;
     const memberContextRegex = /\bsiapa\b.*\b(member|anggota|online|di server|di sini)\b/i;
     const modRegex = /\b(hapus|delete|ban|kick|timeout|mute|warn|peringatan|unban|unmute|clear|purge|bersihkan|nuke|prune|slowmode|lock|unlock)\b/i;
-    const reminderRegex = /\b(ingat|remind|nanti jam|besok|lusa|minggu depan|bulan depan|tahun depan|set reminder|alarm|timer|jadwal|schedule|agenda)\b/i;
+    const reminderRegex = /\b(ingat|remind|reminder|reminders|nanti jam|besok|lusa|minggu depan|bulan depan|tahun depan|set reminder|daftar reminder|list reminder|lihat reminder|cancel reminder|batalkan reminder|hapus reminder|alarm|timer|jadwal|schedule|agenda)\b/i;
     const gameRegex = /\b(tebak|teka-teki|riddle|puzzle|kuis|tebak-tebakan|permainan|jawab|siapakah aku|apa aku|tebak siapa)\b/i;
     const statsRegex = /\b(limit|token|stats|status ai|ping|latency|uptime|memory|cpu|usage|quota|kredit|credit|health|info bot|data|error|eror|masalah|bug|gangguan|diagnosa|diagnosis|troubleshoot|kenapa bot|kenapa error|cookies youtube|cookie youtube)\b/i;
-    const socialRegex = /\b(bilang|bilangin|sampaikan|ucapkan|tanya|tanyain|panggil|greet|message|send|kirim|bisikin|bisik|katakan|kata|kasih tau|beritahukan)\b/i;
+    const socialRegex = /\b(bilang|bilangin|sampaikan|ucapkan|tanya|tanyain|panggil|greet|message|send|kirim|bisikin|bisik|katakan|kata|kasih tau|beritahukan|umumkan|pengumuman|announcement|announce|broadcast)\b/i;
     const commandLikeRegex = /\b(putar|putarkan|play|skip|stop|pause|resume|ban|kick|timeout|hapus|delete|remind|ingatkan|cari|search|ringkas|rangkum|member|profil|role|join|leave|queue|antrian|kontrol|ucapkan|bilang|kirim|sound\s*effect|sfx|myinstants?)\b/i;
 
     let provider = 'groq'; // Default for general chat
@@ -151,7 +151,7 @@ function analyzeComplexity(prompt, options = {}) {
     const needsMentions = /(@|mention|panggil|tentang)/i.test(normalizedPrompt);
 
     const isMusic = musicRegex.test(normalizedPrompt);
-    const isSearch =
+    let isSearch =
         (searchRegex.test(normalizedPrompt) || factualWhoRegex.test(normalizedPrompt)) &&
         !/\b(kamu|aku|kita)\b/i.test(normalizedPrompt); // Avoid searching for users/persona
     const isMember = memberRegex.test(normalizedPrompt) || memberContextRegex.test(normalizedPrompt);
@@ -160,6 +160,16 @@ function analyzeComplexity(prompt, options = {}) {
     const isReminder = reminderRegex.test(normalizedPrompt);
     const isStats = statsRegex.test(normalizedPrompt);
     const isSocial = socialRegex.test(normalizedPrompt);
+
+    // Disambiguation: "terbaru" often appears as a modifier in music requests (e.g. "putarkan lagu X terbaru"),
+    // and should not automatically trigger a web-search tool path.
+    // Keep search intent only if the user explicitly uses search-like verbs/phrases.
+    if (isMusic && isSearch) {
+        const explicitSearchVerbRegex = /\b(cari|cariin|search|google|berita|news|info|internet|apa itu|siapa itu|fakta|definisi|artinya)\b/i;
+        if (!explicitSearchVerbRegex.test(normalizedPrompt)) {
+            isSearch = false;
+        }
+    }
 
     const intentSignals = {
         music: isMusic,
@@ -221,21 +231,25 @@ function analyzeComplexity(prompt, options = {}) {
         needsTool = false;
         needsHistory = true;
     }
+    else if (isMod) {
+        // Moderation must take precedence over member lookups (e.g. "timeout user X", "ban member Y")
+        intent = 'moderation';
+        provider = 'groq';
+    }
     else if (isMusic) {
         intent = 'music';
         provider = 'groq';
         tier = 'balanced';
     }
     else if (isSearch) { intent = 'search'; provider = 'groq'; }
+    else if (isReminder) { intent = 'reminder'; provider = 'groq'; }
+    else if (isStats) { intent = 'stats'; provider = 'groq'; }
     else if (isSocial) {
         intent = 'social';
         provider = 'groq';
         tier = 'balanced'; // Social needs reliability
     }
     else if (isMember) { intent = 'member'; provider = 'groq'; }
-    else if (isMod) { intent = 'moderation'; provider = 'groq'; }
-    else if (isReminder) { intent = 'reminder'; provider = 'groq'; }
-    else if (isStats) { intent = 'stats'; provider = 'groq'; }
     else if (needsHistory && intent === 'general') {
         // Only set intent to 'history' if it's not already pinned to something more specific
         intent = 'history';

@@ -266,25 +266,29 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        if (method === "GET" && pathname === "/api/config") {
-            if (!isAuthorized(req)) {
-                sendJson(res, 401, { ok: false, error: "Unauthorized (invalid token)." });
-                return;
-            }
+	        if (method === "GET" && pathname === "/api/config") {
+	            if (!isAuthorized(req)) {
+	                sendJson(res, 401, { ok: false, error: "Unauthorized (invalid token)." });
+	                return;
+	            }
 
-            const config = buildEditableConfig(readConfig());
-            const stat = fs.statSync(CONFIG_PATH);
-            sendJson(res, 200, {
-                ok: true,
-                config,
-                notes: CONFIG_FIELD_NOTES,
-                meta: {
-                    updatedAt: stat.mtime.toISOString(),
-                    protected: Boolean(ACCESS_TOKEN),
-                },
-            });
-            return;
-        }
+	            const config = buildEditableConfig(readConfig());
+	            const notes = {
+	                ...(isPlainObject(config.config_notes) ? config.config_notes : {}),
+	                ...CONFIG_FIELD_NOTES,
+	            };
+	            const stat = fs.statSync(CONFIG_PATH);
+	            sendJson(res, 200, {
+	                ok: true,
+	                config,
+	                notes,
+	                meta: {
+	                    updatedAt: stat.mtime.toISOString(),
+	                    protected: Boolean(ACCESS_TOKEN),
+	                },
+	            });
+	            return;
+	        }
 
         if (method === "GET" && pathname === "/api/ytdlp-cookies") {
             if (!isAuthorized(req)) {

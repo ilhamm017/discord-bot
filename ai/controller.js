@@ -381,6 +381,11 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
     const quick = await tryHandleMemberPagination(userInput, context);
     if (quick) return { type: "final", message: quick, meta: buildMeta() };
 
+    const { isBotQuestion, answerBotQuestion } = require("../utils/common/bot_docs");
+    if (isBotQuestion(userInput)) {
+        return { type: "final", message: answerBotQuestion(userInput), meta: buildMeta() };
+    }
+
     let iterations = 0;
     while (iterations < maxIterations) {
         iterations++;

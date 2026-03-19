@@ -30,9 +30,12 @@ Bot ini telah direfaktor untuk memisahkan tanggung jawab kode:
    {
      "token": "DISCORD_BOT_TOKEN",
      "prefix": "yova",
-     "groq_api_key": "GROQ_API_KEY",
-     "groq_model": "llama-3.3-70b-versatile"
+     "groq_api_key": "GROQ_API_KEY"
    }
+   ```
+   Opsional rollover key saat rate limit:
+   ```json
+   { "groq_api_keys": ["GROQ_KEY_1", "GROQ_KEY_2"] }
    ```
    *Lihat `config.json.example` (jika ada) untuk opsi lengkap seperti fitur memori AI dan limit pencarian.*
 
