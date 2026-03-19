@@ -34,7 +34,7 @@ module.exports = {
 
     const spotifyRef = parseSpotifyInput(query);
     if (spotifyRef) {
-      return handleSpotify(message, voiceChannel, spotifyRef, query);
+      return handleSpotify(message, voiceChannel, spotifyRef);
     }
 
     const validation = play.yt_validate(query);

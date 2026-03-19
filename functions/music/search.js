@@ -7,8 +7,8 @@ async function search(query, limit = 5) {
     return searchWithYtDlp(query, limit);
 }
 
-async function getInfo(url) {
-    return getInfoWithYtDlp(url);
+async function getInfo(url, options = {}) {
+    return getInfoWithYtDlp(url, options);
 }
 
 module.exports = {

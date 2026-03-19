@@ -1,41 +1,5 @@
-const play = require("play-dl");
-const path = require("path");
-const logger = require("../logger");
-const { getSpotifyCache, saveSpotifyCache } = require("../../storage/db");
-const { searchWithYtDlp } = require("./ytdlp");
-const { scoreYoutubeResult } = require("../../functions/tools/music/youtube_logic");
-
-let config = {};
-try {
-  config = require(path.join(__dirname, "../../config.json"));
-} catch (error) {
-  config = {};
-}
-
-const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
-const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_URI_REGEX = /spotify:(track|playlist|album):([a-zA-Z0-9]+)/i;
 const SPOTIFY_URL_REGEX = /https?:\/\/open\.spotify\.com\/[^\s]+/i;
-
-let cachedToken = null;
-let cachedTokenExpiresAt = 0;
-
-function getSpotifyConfig() {
-  const clientId =
-    config.spotify_client_id ||
-    config.spotifyClientId ||
-    process.env.SPOTIFY_CLIENT_ID;
-  const clientSecret =
-    config.spotify_client_secret ||
-    config.spotifyClientSecret ||
-    process.env.SPOTIFY_CLIENT_SECRET;
-  return { clientId, clientSecret };
-}
-
-function isSpotifyConfigured() {
-  const { clientId, clientSecret } = getSpotifyConfig();
-  return Boolean(clientId && clientSecret);
-}
 
 function parseSpotifyInput(input) {
   if (!input) return null;
@@ -64,376 +28,209 @@ function parseSpotifyInput(input) {
   }
 }
 
-async function getSpotifyToken() {
-  const { clientId, clientSecret } = getSpotifyConfig();
-  if (!clientId || !clientSecret) {
-    throw new Error("SPOTIFY_CONFIG_MISSING");
-  }
-
-  const now = Date.now();
-  if (cachedToken && cachedTokenExpiresAt - now > 30_000) {
-    return cachedToken;
-  }
-
-  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString(
-    "base64"
-  );
-  const body = new URLSearchParams({ grant_type: "client_credentials" });
-
-  const response = await fetch(SPOTIFY_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "yova-discord-bot-v1",
-    },
-    body,
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = data?.error_description || data?.error || "SPOTIFY_AUTH_FAILED";
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
-  }
-
-  cachedToken = data.access_token;
-  cachedTokenExpiresAt = now + Number(data.expires_in || 0) * 1000;
-  return cachedToken;
+function buildSpotifyUrl(ref) {
+  if (!ref?.type || !ref?.id) return null;
+  const type = String(ref.type).toLowerCase();
+  const id = String(ref.id);
+  if (!["track", "playlist", "album"].includes(type)) return null;
+  if (!/^[a-zA-Z0-9]+$/.test(id)) return null;
+  return `https://open.spotify.com/${type}/${id}`;
 }
 
-async function spotifyRequest(url) {
-  const token = await getSpotifyToken();
-  const target = url.startsWith("http") ? url : `${SPOTIFY_API_BASE}${url}`;
+async function fetchSpotifyOEmbedTitle(refOrUrl) {
+  const spotifyUrl = typeof refOrUrl === "string"
+    ? buildSpotifyUrl(parseSpotifyInput(refOrUrl))
+    : buildSpotifyUrl(refOrUrl);
+  if (!spotifyUrl) return null;
 
-  const response = await fetch(target, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": "yova-discord-bot-v1"
-    },
-  });
+  const endpoint = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
 
-  if (response.status === 401) {
-    cachedToken = null;
-    cachedTokenExpiresAt = 0;
-    const retryToken = await getSpotifyToken();
-    const retryResponse = await fetch(target, {
+  try {
+    const response = await fetch(endpoint, {
       headers: {
-        Authorization: `Bearer ${retryToken}`,
-        "User-Agent": "yova-discord-bot-v1"
+        "user-agent": "yova-discord-bot-v1",
       },
     });
-    if (!retryResponse.ok) {
-      const data = await retryResponse.json().catch(() => ({}));
-      const error = new Error(data?.error?.message || "SPOTIFY_REQUEST_FAILED");
-      error.status = retryResponse.status;
-      throw error;
-    }
-    return retryResponse.json();
+    if (!response.ok) return null;
+    const data = await response.json().catch(() => null);
+    const title = typeof data?.title === "string" ? data.title.trim() : "";
+    return title ? title : null;
+  } catch (error) {
+    return null;
   }
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    let message = data?.error?.message || "SPOTIFY_REQUEST_FAILED";
-
-    // Handle the specific "Active premium subscription required" error
-    if (response.status === 403 && (message.includes("premium") || JSON.stringify(data).includes("premium"))) {
-      message = "Spotify API sekarang mewajibkan akun Premium untuk pemilik App (Client ID) sesuai update Februari 2026 (https://developer.spotify.com/blog/2026-02-06-update-on-developer-access-and-platform-security). Silakan upgrade akun Spotify di Spotify Developer Dashboard atau gunakan judul lagu saja tanpa URL.";
-    }
-
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
-  }
-
-  return response.json();
 }
 
-function mapSpotifyTrack(track) {
-  if (!track || !track.id) return null;
+function mapSpotifyPlaylistItemToEntry(item) {
+  const track = item?.track || item?.data || item;
+  if (!track) return null;
   if (track.is_local) return null;
+  if (track.is_playable === false) return null;
+  if (track.playability?.playable === false) return null;
+
+  const title = String(track.name || "").trim();
+
   const artists = Array.isArray(track.artists)
-    ? track.artists.map((artist) => artist.name).filter(Boolean)
-    : [];
+    ? track.artists.map((a) => a?.name).filter(Boolean)
+    : Array.isArray(track.artists?.items)
+      ? track.artists.items
+        .map((a) => a?.profile?.name || a?.name)
+        .filter(Boolean)
+      : [];
+  const artist = artists.join(", ");
+  if (!title) return null;
+
+  const durationMs =
+    Number(track.duration_ms) ||
+    Number(track.duration?.totalMilliseconds) ||
+    0;
+
+  const spotifyUrl =
+    track.external_urls?.spotify ||
+    (typeof track.uri === "string" ? buildSpotifyUrl(parseSpotifyInput(track.uri)) : null) ||
+    null;
+
   return {
-    id: track.id,
-    name: track.name || track.title || "",
-    artists,
-    url: track.external_urls?.spotify || null,
-    durationMs: Number(track.duration_ms) || 0,
-    isPlayable: track.is_playable !== false,
+    title,
+    artist: artist || null,
+    durationMs,
+    spotifyUrl,
   };
 }
 
-async function fetchAllPaging(paging) {
-  if (!paging) return [];
-  const items = [];
-  let current = paging;
-  while (current) {
-    if (Array.isArray(current.items)) {
-      items.push(...current.items);
-    }
-    if (current.next) {
-      current = await spotifyRequest(current.next);
-    } else {
-      break;
-    }
+async function fetchSpotifyPlaylistTrackEntries(playlistId, offset = 0, limit = 50) {
+  const id = String(playlistId || "").trim();
+  if (!id) return [];
+  const safeLimit = Math.max(1, Math.min(Math.trunc(Number(limit) || 50), 50));
+  const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+  const preview =
+    (await fetchSpotifyPlaylistPreviewFromEmbed(id)) ||
+    (await fetchSpotifyPlaylistPreviewFromPage(id));
+  if (!preview) return [];
+
+  if (safeOffset >= preview.entries.length) {
+    const pagingError = new Error("SPOTIFY_PLAYLIST_PAGING_UNAVAILABLE");
+    pagingError.code = "SPOTIFY_PLAYLIST_PAGING_UNAVAILABLE";
+    pagingError.details = {
+      available: preview.entries.length,
+      totalTracks: preview.meta.totalTracks,
+    };
+    throw pagingError;
   }
-  return items;
+
+  return preview.entries.slice(safeOffset, safeOffset + safeLimit);
 }
 
-async function getSpotifyTrack(id) {
-  const data = await spotifyRequest(`/tracks/${id}`);
-  return mapSpotifyTrack(data);
-}
-
-async function getSpotifyPlaylist(id) {
-  const data = await spotifyRequest(`/playlists/${id}`);
-  const items = await fetchAllPaging(data.tracks);
-  const tracks = items
-    .map((item) => mapSpotifyTrack(item.track))
-    .filter((track) => track && track.isPlayable !== false);
-  return { name: data?.name || "Playlist Spotify", tracks };
-}
-
-async function getSpotifyAlbum(id) {
-  const data = await spotifyRequest(`/albums/${id}`);
-  const items = await fetchAllPaging(data.tracks);
-  const tracks = items
-    .map((item) => mapSpotifyTrack(item))
-    .filter((track) => track && track.isPlayable !== false);
-  return { name: data?.name || "Album Spotify", tracks };
-}
-
-async function searchSpotifyTracks(query, limit = 5) {
-  if (!query) return [];
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 20));
-  const data = await spotifyRequest(
-    `/search?type=track&limit=${safeLimit}&q=${encodeURIComponent(query)}`
+function extractInitialStateFromPlaylistHtml(html) {
+  const match = String(html || "").match(
+    /<script id="initialState" type="text\/plain">([^<]+)<\/script>/
   );
-  const items = Array.isArray(data?.tracks?.items) ? data.tracks.items : [];
-  return items
-    .map((item) => mapSpotifyTrack(item))
-    .filter((track) => track && track.isPlayable !== false);
+  if (!match) return null;
+  try {
+    const decoded = Buffer.from(match[1], "base64").toString("utf8");
+    return JSON.parse(decoded);
+  } catch (error) {
+    return null;
+  }
 }
 
-function parseDurationToSeconds(raw) {
-  if (!raw) return null;
-  const parts = String(raw)
-    .split(":")
-    .map((part) => Number(part));
-  if (parts.some((part) => Number.isNaN(part))) return null;
-  let seconds = 0;
-  for (const part of parts) {
-    seconds = seconds * 60 + part;
-  }
-  return seconds || null;
-}
+function extractPlaylistPreviewFromInitialState(initialState, playlistId) {
+  const id = String(playlistId || "").trim();
+  if (!initialState || !id) return null;
 
-function getResultDurationSeconds(result) {
-  if (!result) return null;
-  if (Number.isFinite(result.durationInSec)) return result.durationInSec;
-  if (Number.isFinite(result.durationInSeconds)) return result.durationInSeconds;
-  if (Number.isFinite(result.duration)) return result.duration;
-  if (typeof result.duration === "string") {
-    return parseDurationToSeconds(result.duration);
-  }
-  if (typeof result.durationRaw === "string") {
-    return parseDurationToSeconds(result.durationRaw);
-  }
-  return null;
-}
+  const key = `spotify:playlist:${id}`;
+  const playlist = initialState?.entities?.items?.[key];
+  const title = playlist?.name || playlist?.data?.name || null;
+  const content = playlist?.content || null;
+  const totalTracks = Number(content?.totalCount) || 0;
+  const items = Array.isArray(content?.items) ? content.items : [];
 
-function pickBestResult(results, durationMs, query = "") {
-  if (!Array.isArray(results) || results.length === 0) return null;
-  const targetSeconds = durationMs ? Math.round(durationMs / 1000) : null;
-  let fallback = null;
-  let best = null;
-  let bestDiff = Number.POSITIVE_INFINITY;
-  let bestQualityScore = Number.NEGATIVE_INFINITY;
-
-  for (const result of results) {
-    if (!result?.url && !result?.id) continue;
-    if (!fallback) fallback = result;
-    const qualityScore = scoreYoutubeResult(result, query);
-    if (!targetSeconds) continue;
-    const seconds = getResultDurationSeconds(result);
-    if (!seconds) continue;
-    const diff = Math.abs(seconds - targetSeconds);
-    if (diff < bestDiff || (diff === bestDiff && qualityScore > bestQualityScore)) {
-      bestDiff = diff;
-      best = result;
-      bestQualityScore = qualityScore;
-    }
-  }
-
-  return best || fallback;
-}
-
-async function searchYoutubeCandidatesForSpotify(query, limit = 5) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 10));
-  const variants = Array.isArray(query)
-    ? query.filter(Boolean)
-    : [query].filter(Boolean);
-
-  for (const candidate of variants) {
-    // Prefer yt-dlp first because it's currently more resilient to YouTube payload changes.
-    try {
-      const ytdlpResults = await searchWithYtDlp(candidate, safeLimit);
-      if (Array.isArray(ytdlpResults) && ytdlpResults.length > 0) {
-        return ytdlpResults;
-      }
-    } catch (error) {
-      logger.debug("yt-dlp search failed for Spotify resolver.", {
-        message: error?.cause?.message || error?.message || String(error),
-        stderr: error?.details?.stderr || null,
-        query: candidate,
-      });
-    }
-
-    try {
-      const playResults = await play.search(candidate, { limit: safeLimit });
-      if (Array.isArray(playResults) && playResults.length > 0) return playResults;
-    } catch (error) {
-      logger.debug("play-dl search failed for Spotify resolver.", {
-        message: error?.message || String(error),
-        query: candidate,
-      });
-    }
-  }
-
-  return [];
-}
-
-function buildSpotifyYoutubeQueries(track) {
-  const artists = Array.isArray(track?.artists) ? track.artists.filter(Boolean) : [];
-  const title = String(track?.name || "").trim();
-  if (!title) return [];
-
-  const primaryArtist = artists[0] || "";
-  const base = [artists.join(" "), title].filter(Boolean).join(" - ").trim();
-  const compact = [primaryArtist, title].filter(Boolean).join(" ").trim();
-
-  const variants = [
-    `${base} official audio`,
-    base,
-    `${compact} official audio`,
-    compact,
-    title,
-  ].filter(Boolean);
-
-  return [...new Set(variants)];
-}
-
-async function resolveSpotifyTrackToYoutube(track) {
-  if (!track?.id) return null;
-  const cached = await getSpotifyCache(track.id);
-  if (cached?.youtubeUrl) {
-    const title = cached.title || `${track.name} - ${track.artists.join(", ")}`;
-    const videoId =
-      (typeof cached.youtubeUrl === "string" && cached.youtubeUrl.includes("youtube"))
-        ? (() => {
-          try {
-            return play.extractID(cached.youtubeUrl);
-          } catch (error) {
-            return null;
-          }
-        })()
-        : null;
-    return {
-      url: cached.youtubeUrl,
-      title,
-      source: "youtube",
-      youtubeVideoId: videoId,
-      originalUrl: cached.youtubeUrl,
-      spotify: track,
-    };
-  }
-
-  const queries = buildSpotifyYoutubeQueries(track);
-  if (queries.length === 0) return null;
-
-  const results = await searchYoutubeCandidatesForSpotify(queries, 5);
-
-  const best = pickBestResult(results, track.durationMs, queries[0]);
-  if (!best) return null;
-
-  const url =
-    best.url ||
-    (best.id ? `https://www.youtube.com/watch?v=${best.id}` : null);
-  if (!url) return null;
-
-  const title = `${track.name} - ${track.artists.join(", ")}`.trim();
-  await saveSpotifyCache({
-    spotifyId: track.id,
-    title,
-    artists: track.artists.join(", "),
-    durationMs: track.durationMs,
-    youtubeUrl: url,
-  });
+  const entries = items
+    .map((wrapper) => wrapper?.itemV2?.data || wrapper?.itemV2 || wrapper?.track || wrapper)
+    .map(mapSpotifyPlaylistItemToEntry)
+    .filter(Boolean);
 
   return {
-    url,
-    title,
-    source: "youtube",
-    youtubeVideoId: best.id || null,
-    originalUrl: url,
-    spotify: track,
+    meta: { id, name: title, totalTracks },
+    entries,
+    nextOffset: Number(content?.pagingInfo?.nextOffset) || null,
   };
 }
 
-async function resolveSpotifyTracks(tracks) {
-  const resolved = [];
-  const failed = [];
-  const entries = Array.isArray(tracks) ? tracks : [];
-
-  for (const track of entries) {
-    try {
-      const item = await resolveSpotifyTrackToYoutube(track);
-      if (item) resolved.push(item);
-      else failed.push(track);
-    } catch (error) {
-      logger.warn("Failed resolving Spotify track.", error);
-      failed.push(track);
-    }
+function extractNextDataFromEmbedHtml(html) {
+  const match = String(html || "").match(
+    /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
+  );
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch (error) {
+    return null;
   }
-
-  return { resolved, failed };
 }
 
-async function fetchSpotifyCollection(ref) {
-  if (!ref?.type || !ref?.id) {
-    throw new Error("SPOTIFY_INVALID_REF");
-  }
+function extractPlaylistPreviewFromNextData(nextData, playlistId) {
+  const id = String(playlistId || "").trim();
+  if (!nextData || !id) return null;
 
-  if (ref.type === "track") {
-    const track = await getSpotifyTrack(ref.id);
-    return {
-      type: "track",
-      name: track?.name || "Spotify Track",
-      tracks: track ? [track] : [],
-    };
-  }
+  const entity = nextData?.props?.pageProps?.state?.data?.entity;
+  const trackList = Array.isArray(entity?.trackList) ? entity.trackList : [];
+  if (!trackList.length) return null;
 
-  if (ref.type === "playlist") {
-    const playlist = await getSpotifyPlaylist(ref.id);
-    return { type: "playlist", name: playlist.name, tracks: playlist.tracks };
-  }
+  const entries = trackList
+    .filter((t) => t?.entityType === "track")
+    .map((t) => ({
+      title: String(t?.title || "").trim(),
+      artist: t?.subtitle ? String(t.subtitle).trim() : null,
+      durationMs: Number(t?.duration) || 0,
+      spotifyUrl:
+        typeof t?.uri === "string" ? buildSpotifyUrl(parseSpotifyInput(t.uri)) : null,
+    }))
+    .filter((e) => e.title);
 
-  if (ref.type === "album") {
-    const album = await getSpotifyAlbum(ref.id);
-    return { type: "album", name: album.name, tracks: album.tracks };
-  }
+  const title = entity?.title ? String(entity.title).trim() : null;
 
-  throw new Error("SPOTIFY_INVALID_REF");
+  return {
+    meta: { id, name: title || null, totalTracks: entries.length },
+    entries,
+    nextOffset: null,
+  };
+}
+
+async function fetchSpotifyPlaylistPreviewFromEmbed(playlistId) {
+  const id = String(playlistId || "").trim();
+  if (!id) return null;
+  const url = `https://open.spotify.com/embed/playlist/${id}`;
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const html = await response.text().catch(() => "");
+  const nextData = extractNextDataFromEmbedHtml(html);
+  return extractPlaylistPreviewFromNextData(nextData, id);
+}
+
+async function fetchSpotifyPlaylistPreviewFromPage(playlistId) {
+  const id = String(playlistId || "").trim();
+  if (!id) return null;
+  const url = `https://open.spotify.com/playlist/${id}`;
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const html = await response.text().catch(() => "");
+  const initialState = extractInitialStateFromPlaylistHtml(html);
+  return extractPlaylistPreviewFromInitialState(initialState, id);
+}
+
+async function fetchSpotifyPlaylistMeta(playlistId) {
+  const id = String(playlistId || "").trim();
+  if (!id) return null;
+  const preview =
+    (await fetchSpotifyPlaylistPreviewFromEmbed(id)) ||
+    (await fetchSpotifyPlaylistPreviewFromPage(id));
+  return preview?.meta || null;
 }
 
 module.exports = {
   parseSpotifyInput,
-  isSpotifyConfigured,
-  fetchSpotifyCollection,
-  resolveSpotifyTracks,
-  resolveSpotifyTrackToYoutube,
-  searchSpotifyTracks,
+  buildSpotifyUrl,
+  fetchSpotifyOEmbedTitle,
+  fetchSpotifyPlaylistMeta,
+  fetchSpotifyPlaylistTrackEntries,
 };

@@ -51,7 +51,7 @@ module.exports = {
     // 3. Spotify
     const spotifyRef = parseSpotifyInput(query);
     if (spotifyRef) {
-      return handleSpotify(message, voiceChannel, spotifyRef, query);
+      return handleSpotify(message, voiceChannel, spotifyRef);
     }
 
     // 4. YouTube (Video, Playlist, Search)

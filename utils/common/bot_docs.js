@@ -7,7 +7,7 @@ const MAX_MESSAGE_LENGTH = 1800;
 const DEFAULT_TEXT =
   "Yova bot Discord.\n\n" +
   "Fitur utama:\n" +
-  "- Musik (YouTube/YouTube Music + Spotify link -> YouTube)\n" +
+  "- Musik (YouTube/YouTube Music + Spotify playlist -> YouTube)\n" +
   "- Panel kontrol + queue + repeat/shuffle\n" +
   "- Favorit (kesukaanku)\n" +
   "- AI chat + ucapkan\n" +
@@ -45,15 +45,14 @@ function answerBotQuestion(prompt) {
 
   if (text.includes("spotify")) {
     return (
-      "Bisa. Pakai `yova play <link spotify>` (track/playlist/album). " +
-      "Spotify cuma metadata, playback tetap dari YouTube. " +
-      "Kalau cari judul, hasilnya muncul list YT/Spotify."
+      "Bisa untuk Spotify playlist saja. Pakai `yova play <link spotify playlist>`. " +
+      "Yova akan coba ambil daftar lagu dari playlist lalu cari versi YouTube per lagu dan masukkan ke antrian."
     );
   }
   if (text.includes("youtube") || text.includes("yt")) {
     return (
       "Bisa. Pakai `yova play <judul|url>` untuk YouTube/YouTube Music. " +
-      "Judul akan menampilkan list hasil (YT/Spotify)."
+      "Judul akan menampilkan list hasil YouTube."
     );
   }
   if (text.includes("panel") || text.includes("kontrol")) {

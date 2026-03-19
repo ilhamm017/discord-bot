@@ -192,14 +192,6 @@ function classifyRuntimeIssue(line) {
             suggestedAction: "Cek cookies YouTube, query pencarian, dan error yt-dlp terbaru.",
         },
         {
-            kind: "spotify_mapping_failed",
-            severity: "medium",
-            match: /Spotify resolver|play-dl search failed for Spotify resolver|Gagal memetakan Spotify/i,
-            summary: "Pemetaan lagu Spotify ke YouTube gagal.",
-            probableCause: "Resolver Spotify tidak menemukan kandidat YouTube yang valid atau fallback parser gagal.",
-            suggestedAction: "Coba query yang lebih spesifik atau periksa cookies/resolver YouTube.",
-        },
-        {
             kind: "lavalink_no_tracks",
             severity: "high",
             match: /No tracks found via Lavalink|loadType=error, tracks=0/i,

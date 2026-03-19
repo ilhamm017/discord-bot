@@ -32,7 +32,7 @@
 
 ## Music commands + interactions
 - `discord/tools/music/*` call `discord/player/queue.js` and helpers in `discord/player/queue/*`.
-- `discord/tools/music/play.js` routes to Spotify/YouTube handlers and uses `utils/common/spotify` + `utils/common/ytdlp`.
+- `discord/tools/music/play.js` routes to Spotify playlist fallback (oEmbed title -> YouTube search) or YouTube handlers.
 - `discord/events/interactionCreate.js` handles `music_*` buttons and calls queue controls.
 - `discord/player/panel.js` renders/updates the control panel message.
 

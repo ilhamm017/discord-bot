@@ -14,7 +14,6 @@ const {
 } = require("../player/queue");
 const { buildControlPanel, updateControlPanel } = require("../player/panel");
 const { getSearchSession, clearSearchSession } = require("../player/search");
-const { resolveSpotifyTrackToYoutube } = require("../../utils/common/spotify");
 const {
     markYoutubeTrack,
     primeMyInstantsTrack,
@@ -262,23 +261,7 @@ module.exports = {
                     await interaction.deferUpdate();
 
                     let track = null;
-                    if (item.source === "spotify") {
-                        const resolved = await resolveSpotifyTrackToYoutube(item.spotify || item);
-                        if (!resolved?.url) {
-                            return interaction.followUp({
-                                content: "Gagal memetakan Spotify ke YouTube. Coba lagi atau cek cookies YouTube di panel web.",
-                                ephemeral: true
-                            });
-                        }
-                        track = markYoutubeTrack({
-                            ...resolved,
-                            requestedBy: interaction.user.tag,
-                            requestedById: interaction.member.id
-                        }, {
-                            sourceUrl: resolved.originalUrl || resolved.url,
-                            youtubeVideoId: resolved.youtubeVideoId || null,
-                        });
-                    } else if (item.source === "myinstants") {
+                    if (item.source === "myinstants") {
                         const resolved = await resolveMyInstantsResult(item);
                         track = buildMyInstantsTrack(resolved, {
                             requestedBy: interaction.user.tag,
@@ -336,7 +319,7 @@ module.exports = {
                 } catch (error) {
                     logger.error("Search select failed.", error);
                     const payload = {
-                        content: getYoutubeUserFacingError(error, { spotify: item?.source === "spotify" }) || "Terjadi error saat memilih hasil.",
+                        content: getYoutubeUserFacingError(error) || "Terjadi error saat memilih hasil.",
                         ephemeral: true
                     };
                     if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => { });

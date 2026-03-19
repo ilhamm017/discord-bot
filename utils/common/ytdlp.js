@@ -261,15 +261,17 @@ async function searchWithYtDlp(query, limit = 5) {
     });
 }
 
-async function getInfoWithYtDlp(url) {
+async function getInfoWithYtDlp(url, options = {}) {
     if (!url) return null;
     const binary = await ensureBinary();
+    const noPlaylist = options?.noPlaylist !== false;
+    const dumpFlag = options?.dumpSingleJson ? "--dump-single-json" : "--dump-json";
     const baseArgs = appendYoutubeJsRuntimeArgs(appendYoutubeExtractorArgs([
         url,
-        "--no-playlist",
+        ...(noPlaylist ? ["--no-playlist"] : []),
         "--skip-download",
         "--force-ipv4",
-        "--dump-json",
+        dumpFlag,
         "--no-warnings",
         "--no-progress",
         "-q",

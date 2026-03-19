@@ -128,6 +128,74 @@ function buildCachedTrackUrl(videoId) {
     return `http://${getAudioCacheHost()}:${getAudioCachePort()}/audio-cache/${encodeURIComponent(videoId)}`;
 }
 
+function buildYoutubeWatchUrl(videoId) {
+    if (!isYoutubeCacheId(videoId)) return null;
+    return `https://www.youtube.com/watch?v=${videoId}`;
+}
+
+function extractCacheKeyFromAudioCacheUrl(value) {
+    if (typeof value !== "string") return null;
+    const raw = value.trim();
+    if (!raw) return null;
+    let parsed;
+    try {
+        parsed = new URL(raw);
+    } catch (error) {
+        return null;
+    }
+    if (!parsed.pathname || !parsed.pathname.startsWith("/audio-cache/")) return null;
+    const rest = parsed.pathname.slice("/audio-cache/".length);
+    const first = rest.split("/")[0];
+    if (!first) return null;
+    const decoded = decodeURIComponent(first);
+    return isValidVideoId(decoded) ? decoded : null;
+}
+
+function extractCacheKeyFromAudioCacheFilePath(value) {
+    if (!isAudioCacheFilePath(value)) return null;
+    const base = path.basename(String(value));
+    const prefix = base.split(".")[0];
+    return isValidVideoId(prefix) ? prefix : null;
+}
+
+function isAudioCacheUrl(value) {
+    if (typeof value !== "string") return false;
+    const raw = value.trim();
+    if (!raw) return false;
+    let parsed;
+    try {
+        parsed = new URL(raw);
+    } catch (error) {
+        return false;
+    }
+
+    if (!parsed.pathname || !parsed.pathname.startsWith("/audio-cache/")) return false;
+
+    const configuredHost = getAudioCacheHost();
+    const configuredPort = getAudioCachePort();
+    const allowedHosts = new Set([
+        configuredHost,
+        "127.0.0.1",
+        "localhost",
+        "0.0.0.0",
+    ]);
+    if (!allowedHosts.has(parsed.hostname)) return false;
+    if (!parsed.port) return true;
+    return Number(parsed.port) === configuredPort;
+}
+
+function isAudioCacheFilePath(value) {
+    if (typeof value !== "string") return false;
+    const raw = value.trim();
+    if (!raw) return false;
+    if (/^[a-zA-Z]+:\/\//.test(raw)) return false;
+    if (!path.isAbsolute(raw)) return false;
+
+    const root = path.resolve(getAudioCacheRoot());
+    const resolved = path.resolve(raw);
+    return resolved === root || resolved.startsWith(`${root}${path.sep}`);
+}
+
 function getCachedTrackUrl(videoId) {
     const filePath = findCachedFilePath(videoId);
     if (!filePath) return null;
@@ -215,7 +283,7 @@ function getPlaybackSourceInfo(track) {
         return { url: null, mode: "none", cacheKey: null };
     }
 
-    const youtubeVideoId = track.youtubeVideoId || extractYoutubeVideoId(track.originalUrl || track.url);
+    let youtubeVideoId = track.youtubeVideoId || extractYoutubeVideoId(track.originalUrl || track.url);
     if (youtubeVideoId) {
         const cachedTarget = getCachedPlaybackTarget(youtubeVideoId);
         if (cachedTarget?.url) {
@@ -233,8 +301,21 @@ function getPlaybackSourceInfo(track) {
         }
     }
 
+    let remoteUrl = track.originalUrl || track.originUrl || track.url || null;
+    if (!youtubeVideoId && remoteUrl) {
+        const keyFromCache =
+            extractCacheKeyFromAudioCacheUrl(remoteUrl) ||
+            extractCacheKeyFromAudioCacheFilePath(remoteUrl);
+        if (isYoutubeCacheId(keyFromCache)) {
+            youtubeVideoId = keyFromCache;
+        }
+    }
+    if (youtubeVideoId && remoteUrl && (isAudioCacheUrl(remoteUrl) || isAudioCacheFilePath(remoteUrl))) {
+        remoteUrl = buildYoutubeWatchUrl(youtubeVideoId) || remoteUrl;
+    }
+
     return {
-        url: track.originalUrl || track.originUrl || track.url || null,
+        url: remoteUrl,
         mode: "remote",
         cacheKey: youtubeVideoId || track.cacheKey || getMyInstantsCacheKey(track) || null,
     };
@@ -398,8 +479,21 @@ function queueDownload(videoId, sourceUrl, options = {}) {
 function primeYoutubeTrack(track) {
     if (!track || typeof track !== "object") return null;
 
-    const sourceUrl = track.originalUrl || track.originUrl || track.url;
-    const videoId = track.youtubeVideoId || extractYoutubeVideoId(sourceUrl);
+    let sourceUrl = track.originalUrl || track.originUrl || track.url;
+    let videoId = track.youtubeVideoId || extractYoutubeVideoId(sourceUrl);
+    if (!videoId && sourceUrl) {
+        const derivedKey =
+            extractCacheKeyFromAudioCacheUrl(sourceUrl) ||
+            extractCacheKeyFromAudioCacheFilePath(sourceUrl);
+        if (isYoutubeCacheId(derivedKey)) {
+            videoId = derivedKey;
+        }
+    }
+    const fallbackUrl = videoId ? buildYoutubeWatchUrl(videoId) : null;
+    if (videoId && (!sourceUrl || isAudioCacheUrl(sourceUrl) || isAudioCacheFilePath(sourceUrl))) {
+        sourceUrl = fallbackUrl;
+    }
+
     if (!videoId || !sourceUrl) {
         logger.debug("Audio cache prime skipped: missing YouTube metadata.", {
             videoId: videoId || null,
@@ -470,6 +564,7 @@ function primeMyInstantsTrack(track) {
 
 module.exports = {
     buildCachedTrackUrl,
+    buildYoutubeWatchUrl,
     ensureAudioCacheDir,
     extractYoutubeVideoId,
     findCachedFilePath,

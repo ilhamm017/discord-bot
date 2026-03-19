@@ -113,6 +113,56 @@ runCase("getPlaybackSourceInfo marks remote fallback when cache is absent", () =
   });
 });
 
+runCase("getPlaybackSourceInfo falls back from stale cache URL to YouTube URL", () => {
+  const videoId = "9bZkp7q19f0";
+  const cacheUrl = `http://127.0.0.1:8765/audio-cache/${videoId}`;
+  const source = getPlaybackSourceInfo({
+    source: "youtube",
+    url: cacheUrl,
+    originalUrl: cacheUrl,
+    youtubeVideoId: videoId,
+  });
+
+  assert.deepStrictEqual(source, {
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    mode: "remote",
+    cacheKey: videoId,
+  });
+});
+
+runCase("getPlaybackSourceInfo recovers YouTube ID from stale cache URL", () => {
+  const videoId = "ZzZzZzZzZzZ";
+  const cacheUrl = `http://127.0.0.1:8765/audio-cache/${videoId}`;
+  const source = getPlaybackSourceInfo({
+    source: "youtube",
+    url: cacheUrl,
+    originalUrl: cacheUrl,
+  });
+
+  assert.deepStrictEqual(source, {
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    mode: "remote",
+    cacheKey: videoId,
+  });
+});
+
+runCase("getPlaybackSourceInfo falls back from stale cache file path to YouTube URL", () => {
+  const videoId = "QwErTyUiOpA";
+  const cachePath = path.join(tempRoot, `${videoId}.webm`);
+  const source = getPlaybackSourceInfo({
+    source: "youtube",
+    url: cachePath,
+    originalUrl: cachePath,
+    youtubeVideoId: videoId,
+  });
+
+  assert.deepStrictEqual(source, {
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    mode: "remote",
+    cacheKey: videoId,
+  });
+});
+
 runCase("getPlaybackUrlForTrack prefers local cache for MyInstants audio", () => {
   ensureAudioCacheDir();
   const sourceUrl = "https://www.myinstants.com/media/sounds/bonk.mp3";
@@ -147,4 +197,4 @@ runCase("stale YouTube mp4 cache is ignored when preferred container is webm or 
   assert.strictEqual(fs.existsSync(path.join(tempRoot, `${staleId}.mp4`)), false);
 });
 
-console.log("\nMedia cache regression passed (9/9)");
+console.log("\nMedia cache regression passed (12/12)");

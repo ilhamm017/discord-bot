@@ -1,7 +1,13 @@
 const { client } = require("../../discord/client");
 const { enqueueTrack, stopPlayback, skipTrack, togglePause, restoreQueue, getState } = require("../../discord/player/queue");
 const { searchYoutube } = require("../tools/music/youtube_logic");
-const { isSpotifyConfigured, searchSpotifyTracks, resolveSpotifyTrackToYoutube } = require("../../utils/common/spotify");
+const {
+    parseSpotifyInput,
+    buildSpotifyUrl,
+    fetchSpotifyOEmbedTitle,
+    fetchSpotifyPlaylistMeta,
+    fetchSpotifyPlaylistTrackEntries,
+} = require("../../utils/common/spotify");
 const {
     buildMyInstantsTrack,
     detectMyInstantsRequest,
@@ -68,12 +74,14 @@ async function playMusic(guildId, userId, channelId, query, targetUserId = null,
             await restoreQueue(voiceChannel).catch(() => { });
         }
 
-        const myInstantsRequest = detectMyInstantsRequest(query, { source });
+        let resolvedQuery = query;
+        const myInstantsRequest = detectMyInstantsRequest(resolvedQuery, { source });
         let track = null;
+        let tracks = [];
 
         if (myInstantsRequest.shouldUseMyInstants) {
             try {
-                const resolved = await resolveMyInstantsTrack(query, {
+                const resolved = await resolveMyInstantsTrack(resolvedQuery, {
                     source,
                     limit: 1,
                 });
@@ -88,56 +96,69 @@ async function playMusic(guildId, userId, channelId, query, targetUserId = null,
                 logger.warn("MyInstants search failed in playMusic tool.", error);
             }
         } else {
-            let tracks = [];
+            const spotifyRef = parseSpotifyInput(resolvedQuery);
+            if (spotifyRef) {
+                if (spotifyRef.type !== "playlist") {
+                    return {
+                        error:
+                            "Spotify track/album tidak didukung tanpa Spotify API. " +
+                            "Silakan pakai judul (teks) atau link YouTube.",
+                    };
+                }
 
-            // 1. Detect if it's a Spotify URL first
-            const spotifyRef = require("../../utils/common/spotify").parseSpotifyInput(query);
-            if (spotifyRef && isSpotifyConfigured()) {
+                const playlistUrl = buildSpotifyUrl(spotifyRef);
+                const playlistTitle = await fetchSpotifyOEmbedTitle(playlistUrl);
+                if (!playlistTitle) {
+                    return {
+                        error:
+                            "Gagal mengambil judul playlist Spotify (oEmbed). " +
+                            "Coba lagi, atau copy judul playlistnya lalu kirim judulnya saja.",
+                    };
+                }
+
+                // Enumerate playlist items via Spotify web access token (no app credentials).
+                const playlistId = String(spotifyRef.id);
+                let totalTracks = 0;
                 try {
-                    const { fetchSpotifyCollection, resolveSpotifyTracks } = require("../../utils/common/spotify");
-                    const collection = await fetchSpotifyCollection(spotifyRef);
-                    if (collection.tracks && collection.tracks.length > 0) {
-                        const resolved = await resolveSpotifyTracks(collection.tracks);
-                        if (resolved.resolved.length > 0) {
-                            // Map the first few tracks into our internal tracks list
-                            // Note: AI tool currently mostly plays the first one found if we don't change the return logic
-                            tracks = resolved.resolved.map(item => ({
-                                url: item.url,
-                                title: item.title,
-                                durationMs: item.durationMs,
-                                thumbnail: item.thumbnail,
-                                youtubeVideoId: item.youtubeVideoId
-                            }));
+                    const meta = await fetchSpotifyPlaylistMeta(playlistId);
+                    totalTracks = Number(meta?.totalTracks) || 0;
+                } catch (error) {
+                    totalTracks = 0;
+                }
+
+                if (totalTracks > 0) {
+                    const maxResolve = 30;
+                    for (let offset = 0; offset < totalTracks && tracks.length < maxResolve; offset += 50) {
+                        const entries = await fetchSpotifyPlaylistTrackEntries(playlistId, offset, 50).catch(() => []);
+                        if (!entries.length) break;
+
+                        for (const entry of entries) {
+                            if (tracks.length >= maxResolve) break;
+                            const entryTitle = String(entry?.title || "").trim();
+                            const entryArtist = String(entry?.artist || "").trim();
+                            const entryQuery = [entryTitle, entryArtist].filter(Boolean).join(" ").trim();
+                            if (!entryQuery) continue;
+
+                            const ytResults = await searchYoutube(`${entryQuery} official audio`, 1).catch(() => []);
+                            if (!ytResults || ytResults.length === 0) continue;
+                            tracks.push({
+                                url: ytResults[0].url,
+                                title: ytResults[0].title,
+                                durationMs: ytResults[0].durationMs,
+                                thumbnail: ytResults[0].thumbnail
+                            });
                         }
                     }
-                } catch (err) {
-                    logger.debug("Spotify collection fetch failed in playMusic tool.", err.message);
-                    // Fallback to error message if it's a Spotify URL but we can't fetch it
-                    if (spotifyRef) {
-                        return { error: `Gagal mengambil data dari Spotify: ${err.message}` };
-                    }
+                }
+
+                if (tracks.length === 0) {
+                    resolvedQuery = playlistTitle;
                 }
             }
 
-            // 2. Search Spotify if configured (for non-URL search queries)
-            if (tracks.length === 0 && isSpotifyConfigured()) {
-                try {
-                    const spotifyResults = await searchSpotifyTracks(query, 10);
-                    if (spotifyResults.length > 0) {
-                        // Start resolving the first one immediately as the priority
-                        const resolved = await resolveSpotifyTrackToYoutube(spotifyResults[0]);
-                        if (resolved) {
-                            tracks.push(resolved);
-                        }
-                    }
-                } catch (err) {
-                    logger.debug("Spotify search failed in playMusic tool.", err);
-                }
-            }
-
-            // 2. Search YouTube (Always as fallback or additional)
+            // Search YouTube
             if (tracks.length === 0) {
-                const ytResults = await searchYoutube(query, 10);
+                const ytResults = await searchYoutube(resolvedQuery, 10);
                 if (ytResults && ytResults.length > 0) {
                     tracks.push({
                         url: ytResults[0].url,
@@ -205,7 +226,7 @@ async function playMusic(guildId, userId, channelId, query, targetUserId = null,
             return {
                 success: true,
                 status: result.started ? "playing" : "queued",
-                title: spotifyRef ? (spotifyRef.type === 'playlist' ? 'playlist' : 'album') : "koleksi lagu",
+                title: "koleksi lagu",
                 trackCount: tracks.length,
                 position: result.startPosition
             };

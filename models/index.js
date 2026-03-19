@@ -15,7 +15,6 @@ const ToolInvocation = require("./ToolInvocation");
 // Existing models
 const Favorite = require("./Favorite");
 const { QueueState, QueueItem } = require("./Queue");
-const SpotifyCache = require("./SpotifyCache");
 const User = require("./User");
 const UserMemory = require("./UserMemory");
 const UserQueueHistory = require("./UserQueueHistory");
@@ -56,7 +55,6 @@ module.exports = {
     Favorite,
     QueueState,
     QueueItem,
-    SpotifyCache,
     User,
     UserMemory,
     UserQueueHistory,

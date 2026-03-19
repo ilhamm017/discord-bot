@@ -7,10 +7,6 @@ const { search: searchWithYtDlp } = require("../../../../functions/music/search"
 const { registerSearchSession } = require("../../../player/search");
 const logger = require("../../../../utils/logger");
 const {
-    isSpotifyConfigured,
-    searchSpotifyTracks,
-} = require("../../../../utils/common/spotify");
-const {
     markYoutubeTrack,
     primeYoutubeTrack,
 } = require("../../../../utils/common/media_cache");
@@ -25,9 +21,6 @@ try {
 
 const YT_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_youtube)
     ? config.search_results_limit_youtube
-    : 5;
-const SPOTIFY_SEARCH_LIMIT = Number.isInteger(config.search_results_limit_spotify)
-    ? config.search_results_limit_spotify
     : 5;
 const SEARCH_OPTION_LIMIT = 25;
 
@@ -170,35 +163,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
             logger.warn("YouTube search failed.", error);
         }
 
-        let spotifyItems = [];
-        if (isSpotifyConfigured()) {
-            try {
-                const spotifyResults = await searchSpotifyTracks(
-                    query,
-                    SPOTIFY_SEARCH_LIMIT
-                );
-                spotifyItems = spotifyResults.map((track) => ({
-                    source: "spotify",
-                    title: track?.name || "Spotify Track",
-                    artists: track?.artists || [],
-                    durationMs: track?.durationMs || null,
-                    spotify: {
-                        id: track?.id,
-                        name: track?.name,
-                        artists: track?.artists || [],
-                        durationMs: track?.durationMs || 0,
-                    },
-                    url: track?.url || null,
-                }));
-            } catch (error) {
-                logger.warn("Failed searching Spotify, continuing.", error);
-            }
-        }
-
-        const combined = [...youtubeItems, ...spotifyItems].slice(
-            0,
-            SEARCH_OPTION_LIMIT
-        );
+        const combined = [...youtubeItems].slice(0, SEARCH_OPTION_LIMIT);
 
         if (combined.length === 0) {
             return message.reply("Tidak menemukan hasil untuk judul itu.");
@@ -243,7 +208,7 @@ async function handleYoutube(message, voiceChannel, query, validation, options =
         const row = new ActionRowBuilder().addComponents(selectMenu);
         const targetLabel = voiceChannel?.id ? ` di <#${voiceChannel.id}>` : "";
         const sent = await message.reply({
-            content: `Pilih hasil pencarian (YT/Spotify)${targetLabel}:`,
+            content: `Pilih hasil pencarian (YouTube)${targetLabel}:`,
             components: [row],
         });
 

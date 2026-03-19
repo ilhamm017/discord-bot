@@ -13,7 +13,25 @@ const {
 } = require("../../../utils/common/media_cache");
 const { isYoutubeCookiesError } = require("../../../utils/common/youtube_error");
 
-const PLAY_HISTORY_LIMIT = 25;
+let config = {};
+try {
+    // eslint-disable-next-line global-require
+    config = require("../../../config.json");
+} catch (error) {
+    config = {};
+}
+
+function getPlayHistoryLimit() {
+    const raw =
+        process.env.PLAY_HISTORY_LIMIT ||
+        config.play_history_limit ||
+        200;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return 200;
+    const bounded = Math.trunc(parsed);
+    if (bounded < 25) return 25;
+    return Math.min(bounded, 1000);
+}
 const AUTH_FAILURE_COOLDOWN_MS = 90 * 1000;
 
 function cloneTrackForHistory(track) {
@@ -61,8 +79,9 @@ function addTrackToHistory(state, track) {
         return getTrackHistoryKey(item) !== historyKey;
     });
     state.playHistory.unshift(snapshot);
-    if (state.playHistory.length > PLAY_HISTORY_LIMIT) {
-        state.playHistory = state.playHistory.slice(0, PLAY_HISTORY_LIMIT);
+    const limit = getPlayHistoryLimit();
+    if (state.playHistory.length > limit) {
+        state.playHistory = state.playHistory.slice(0, limit);
     }
 }
 

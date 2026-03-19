@@ -33,26 +33,13 @@ function isYoutubeSearchInfraError(error) {
     return /YTDLP_SEARCH_FAILED|YTDLP_DOWNLOAD_FAILED|browseId|youtube search failed|no tracks found via lavalink/i.test(text);
 }
 
-function isSpotifyPremiumError(error) {
-    const text = getErrorText(error);
-    return /premium|SPOTIFY_REQUEST_FAILED.*403|Active premium subscription required/i.test(text);
-}
-
-function getYoutubeUserFacingError(error, { spotify = false } = {}) {
+function getYoutubeUserFacingError(error) {
     if (isYoutubeCookiesError(error)) {
-        return spotify
-            ? "Gagal memetakan lagu Spotify karena cookies YouTube bermasalah atau sudah expired. Upload ulang cookies YouTube di panel web."
-            : "Gagal memutar dari YouTube karena cookies YouTube bermasalah atau sudah expired. Upload ulang cookies YouTube di panel web.";
-    }
-
-    if (isSpotifyPremiumError(error)) {
-        return "Spotify API sekarang mewajibkan akun Premium untuk pemilik App (Client ID) sesuai update Februari 2026. Silakan upgrade akun Spotify di Spotify Developer Dashboard atau gunakan judul lagu saja tanpa URL.";
+        return "Gagal memutar dari YouTube karena cookies YouTube bermasalah atau sudah expired. Upload ulang cookies YouTube di panel web.";
     }
 
     if (isYoutubeSearchInfraError(error)) {
-        return spotify
-            ? "Gagal memetakan lagu Spotify ke YouTube saat ini. Coba judul lain atau cek lagi cookies YouTube."
-            : "Gagal mencari atau memutar hasil YouTube saat ini. Coba judul lain atau cek lagi cookies YouTube.";
+        return "Gagal mencari atau memutar hasil YouTube saat ini. Coba judul lain atau cek lagi cookies YouTube.";
     }
 
     return null;

@@ -3,7 +3,6 @@ const { connectDB, sequelize } = require("./sequelize");
 const { QueueState, QueueItem } = require("../models/Queue");
 const Favorite = require("../models/Favorite");
 const User = require("../models/User");
-const SpotifyCache = require("../models/SpotifyCache");
 const UserMemory = require("../models/UserMemory");
 const GuildPlaybackHistory = require("../models/GuildPlaybackHistory");
 const ElevenLabsUsage = require("../models/ElevenLabsUsage");
@@ -261,37 +260,6 @@ async function clearUserCallName(userId) {
 }
 
 // -----------------------------------------------------------------------------
-// Spotify Cache
-// -----------------------------------------------------------------------------
-async function saveSpotifyCache(entry) {
-  if (!entry?.spotifyId || !entry?.youtubeUrl) return false;
-  try {
-    await SpotifyCache.upsert({
-      spotifyId: entry.spotifyId,
-      title: entry.title || "",
-      artists: entry.artists || "",
-      durationMs: Number(entry.durationMs) || 0,
-      youtubeUrl: entry.youtubeUrl,
-    });
-    return true;
-  } catch (error) {
-    logger.error("Failed saving Spotify cache (Sequelize).", error);
-    return false;
-  }
-}
-
-async function getSpotifyCache(spotifyId) {
-  try {
-    const cache = await SpotifyCache.findByPk(spotifyId);
-    if (!cache) return null;
-    return cache; // Sequelize model instance is compatible enough
-  } catch (error) {
-    logger.error("Failed loading Spotify cache (Sequelize).", error);
-    return null;
-  }
-}
-
-// -----------------------------------------------------------------------------
 // User Memory
 // -----------------------------------------------------------------------------
 async function addUserMemory({ userId, kind, value }) {
@@ -526,8 +494,6 @@ module.exports = {
   setUserCallName,
   getUserCallName,
   clearUserCallName,
-  saveSpotifyCache,
-  getSpotifyCache,
   addUserMemory,
   listUserMemory,
   saveUserQueueHistory,

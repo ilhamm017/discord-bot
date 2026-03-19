@@ -101,6 +101,46 @@ await runCase("buildControlPanel renders history view with history select menu",
   assert.strictEqual(panel.embeds[0].data.fields.some((field) => field.name === "History List"), true);
 });
 
+await runCase("buildControlPanel paginates history beyond 25 items", () => {
+  process.env.PLAY_HISTORY_LIMIT = "60";
+  const state = { playHistory: [] };
+  for (let i = 0; i < 60; i += 1) {
+    const videoId = String(i).padStart(11, "a").slice(-11);
+    addTrackToHistory(state, {
+      title: `Song ${i + 1}`,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      youtubeVideoId: videoId,
+      requestedById: "456",
+      info: { video_details: { durationInSec: 180, thumbnails: [] } },
+    });
+  }
+
+  const panel = buildControlPanel({
+    queue: [{
+      title: "Now Playing",
+      url: "https://www.youtube.com/watch?v=ccccccccccc",
+      requestedById: "123",
+      info: { video_details: { durationInSec: 120, thumbnails: [] } },
+    }],
+    currentIndex: 0,
+    repeatMode: "off",
+    panelView: "history",
+    historyPage: 2,
+    queuePage: 0,
+    playHistory: state.playHistory,
+    player: {
+      state: {
+        playing: true,
+        paused: false,
+      },
+    },
+  });
+
+  assert.strictEqual(panel.embeds[0].data.footer.text, "History Page 3/3");
+  const historyListField = panel.embeds[0].data.fields.find((field) => field.name === "History List");
+  assert.strictEqual(Boolean(historyListField?.value?.includes("... 50 lagu history sebelum")), true);
+});
+
 await runCase("buildControlPanel keeps history accessible when queue is empty", () => {
   const panel = buildControlPanel({
     queue: [],
@@ -193,7 +233,7 @@ await runCase("hydratePlaybackHistories loads persisted rows into memory", async
   }
 });
 
-  console.log("\nPanel history regression passed (7/7)");
+  console.log("\nPanel history regression passed (8/8)");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

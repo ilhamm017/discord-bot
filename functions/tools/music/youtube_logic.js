@@ -67,6 +67,35 @@ function scoreYoutubeResult(result, query = "") {
     return score;
 }
 
+function rankYoutubeResults(results, query = "") {
+    const items = Array.isArray(results) ? results.slice() : [];
+    items.sort((a, b) => {
+        return scoreYoutubeResult(b, query) - scoreYoutubeResult(a, query);
+    });
+    return items;
+}
+
+function buildYoutubeSearchVariants(query) {
+    const raw = String(query || "").trim();
+    if (!raw) return [];
+
+    const normalizedSpaces = raw.replace(/\s+/g, " ").trim();
+    const noPipes = normalizedSpaces.replace(/\s*\|\s*/g, " ").replace(/\s+/g, " ").trim();
+    const stripped = noPipes
+        .replace(/\b(official audio|lyrics|lyric video)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const variants = [
+        normalizedSpaces,
+        noPipes,
+        stripped,
+        stripped ? `${stripped} official audio` : null,
+    ].filter(Boolean);
+
+    return [...new Set(variants)];
+}
+
 function getYoutubeDurationMs(result) {
     if (!result) return null;
     if (Number.isFinite(result.durationInSec)) {
@@ -110,6 +139,8 @@ async function searchYoutube(query, limit, { searchWithFallback = true } = {}) {
 }
 
 module.exports = {
+    buildYoutubeSearchVariants,
+    rankYoutubeResults,
     scoreYoutubeResult,
     getYoutubeDurationMs,
     fetchPlaylistVideos,
