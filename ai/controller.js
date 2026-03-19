@@ -437,11 +437,11 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
         systemMessage += `\n\n[IDs]\nGuild: ${context.guildId}\nChannel: ${context.channelId}`;
     }
 
-    if (replyContext) {
+    if (!useCompactPrompt && replyContext) {
         systemMessage += `\n\n[REPLY CONTEXT]\n${replyContext}`;
     }
 
-    if (includeServerContext && serverContextText) {
+    if (!useCompactPrompt && includeServerContext && serverContextText) {
         systemMessage += `\n\n[SERVER CONTEXT]\n${serverContextText}`;
     }
 
