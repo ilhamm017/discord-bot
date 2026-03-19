@@ -25,6 +25,44 @@ function getContextMode() {
     return mode === "minimal" ? "minimal" : "full";
 }
 
+function getHistoryMode(contextMode = "full") {
+    const configured = String(config.ai_history_mode || "").toLowerCase().trim();
+    if (["tool", "prefetch", "minimal", "off"].includes(configured)) return configured;
+    // Default: when context is minimal, rely on tools; otherwise keep current behavior.
+    return contextMode === "minimal" ? "tool" : "prefetch";
+}
+
+function shouldFetchChatHistory(prompt, options = {}, historyMode = "prefetch") {
+    if (historyMode === "off" || historyMode === "tool") return false;
+
+    // Prefetch mode keeps old behavior; minimal mode only fetches when explicitly needed.
+    if (historyMode === "prefetch" && options.replyContext) return true;
+
+    const text = String(prompt || "").toLowerCase().trim();
+    if (!text) return false;
+
+    return /\b(chat|pesan|riwayat|history|konteks|context|sebelumnya|tadi|barusan|bahas apa|ngomong apa|last message|msg)\b/i.test(text);
+}
+
+function guessIncludeOthers(message, prompt, options = {}) {
+    // If user replies to a bot message, default to just user<->bot unless they ask about others explicitly.
+    const text = String(prompt || "").toLowerCase();
+
+    if (message?.mentions?.users?.size) return true;
+    if (message?.mentions?.roles?.size) return true;
+    if (message?.mentions?.everyone || message?.mentions?.here) return true;
+
+    // Explicit multi-user/channel context intent
+    if (/\b(di|dalam)\s+(chat|channel|server)\b/i.test(text)) return true;
+    if (/\b(orang lain|yang lain|member|anggota|kalian|teman|temen|pada)\b/i.test(text)) return true;
+    if (/\bsiapa\b/i.test(text)) return true;
+
+    // For reply threads, keep it narrow by default.
+    if (options.replyContext) return false;
+
+    return false;
+}
+
 /**
  * Validates if the message is safe to process
  */
@@ -32,15 +70,6 @@ function isValidMessage(message) {
     if (message.author.bot) return false;
     if (!message.content.trim()) return false;
     return true;
-}
-
-function shouldFetchChatHistory(prompt, options = {}) {
-    if (options.replyContext) return true;
-
-    const text = String(prompt || "").toLowerCase().trim();
-    if (!text) return false;
-
-    return /\b(chat|pesan|riwayat|history|konteks|context|sebelumnya|tadi|barusan|bahas apa|ngomong apa|last message|msg)\b/i.test(text);
 }
 
 /**
@@ -63,6 +92,7 @@ async function handleDiscordMessage(message, prompt, options = {}) {
 
         // 1. Build Context
         const contextMode = getContextMode();
+        const historyMode = getHistoryMode(contextMode);
         const callName = await getAuthorCallName(message);
         const memorySummary =
             contextMode === "minimal" ? "" : await buildMemorySummary(userId);
@@ -91,17 +121,27 @@ async function handleDiscordMessage(message, prompt, options = {}) {
 
         // 3. Get Chat History only when the prompt clearly needs channel context.
         let history = [];
-        if (shouldFetchChatHistory(prompt, options)) {
+        if (shouldFetchChatHistory(prompt, options, historyMode)) {
             const { getChatHistory } = require("../../utils/ai/ai_chat");
-            const historyRaw = await getChatHistory(message.channel, userId, message.client.user.id, message.id, {
-                includeOthers: true,
-                includeAuthorNames: true
-            });
+            const includeOthers = guessIncludeOthers(message, prompt, options);
+            const includeAuthorNames = includeOthers;
+            const historyRaw = await getChatHistory(
+                message.channel,
+                userId,
+                message.client.user.id,
+                message.id,
+                { includeOthers, includeAuthorNames }
+            );
 
-            history = historyRaw.map(msg => ({
-                role: msg.role === 'assistant' ? 'assistant' : 'user',
-                content: msg.role === 'assistant' ? msg.content : `${msg.authorName}: ${msg.content}`
-            }));
+            history = historyRaw.map((msg) => {
+                if (msg.role === "assistant") {
+                    return { role: "assistant", content: msg.content };
+                }
+                const text = includeAuthorNames && msg.authorName
+                    ? `${msg.authorName}: ${msg.content}`
+                    : msg.content;
+                return { role: "user", content: text };
+            });
         }
 
         // 4. Run Agent

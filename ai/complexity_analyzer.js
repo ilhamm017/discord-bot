@@ -91,7 +91,12 @@ function analyzeComplexity(prompt, options = {}) {
     const hasDirectMention = /<@!?\d+>/.test(normalizedPrompt);
 
     // 6. Bot Question Detection & Intent Flags
-    const lastAssistantMsg = [...(options.messages || [])].reverse().find(m => m.role === 'assistant')?.content || "";
+    // Prefer explicit reply context (reply-to-bot) if provided, to avoid needing history prefetch.
+    const replyContext = typeof options.replyContext === "string" ? options.replyContext : "";
+    const lastAssistantMsg =
+        replyContext.trim() ||
+        [...(options.messages || [])].reverse().find(m => m.role === 'assistant')?.content ||
+        "";
     const lastAssistantMsgLower = String(lastAssistantMsg || "").toLowerCase();
     const isReplyingToQuestion = lastAssistantMsgLower.includes('?') || /mau|apa|siapa|cari|judul/i.test(lastAssistantMsgLower);
 

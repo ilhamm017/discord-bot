@@ -335,7 +335,10 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
     });
 
     const { analyzeComplexity } = require("./complexity_analyzer");
-    const { intent, needsHistory, needsTool } = analyzeComplexity(userInput, { messages: messageHistory });
+    const { intent, needsHistory, needsTool } = analyzeComplexity(userInput, {
+        messages: messageHistory,
+        replyContext: context?.replyContext || ""
+    });
     let usedTools = false;
     const buildMeta = () => ({
         intent,
