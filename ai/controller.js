@@ -12,6 +12,7 @@ const COMPACT_SYSTEM_PROMPT = [
     "Gunakan Bahasa Indonesia natural, ringkas, dan sopan.",
     "Jika tidak perlu aksi/tool, balas langsung ke pertanyaan user.",
     "Kalau butuh info server/musik/memori, pakai tool getServerInfo/getMusicStatus/getUserProfile/getUserMemory.",
+    "Kalau user minta konteks chat/riwayat, pakai tool getRecentMessages/getMessagesAround/searchStoredMessages.",
     'Output wajib JSON valid: {"type":"final","message":"..."} atau {"type":"tool_call",...}.',
     "Jangan tampilkan JSON mentah atau detail teknis ke user.",
 ].join(" ");
@@ -25,6 +26,73 @@ function readRuntimeConfig() {
     } catch (error) {
         return {};
     }
+}
+
+function isExplicitHistoryRequest(text = "") {
+    const t = String(text || "").toLowerCase();
+    if (!t.trim()) return false;
+    return /\b(chat|pesan|riwayat|history|konteks|context|sebelumnya|tadi|barusan|bahas apa|ngomong apa|last message|msg)\b/i.test(t);
+}
+
+function safeClampInt(value, min, max, fallback) {
+    const num = Number.isFinite(Number(value)) ? Number(value) : fallback;
+    const int = Number.isInteger(num) ? num : Math.floor(num);
+    return Math.max(min, Math.min(max, int));
+}
+
+function formatRecentMessagesForContext(items = [], {
+    maxTotalChars = 1200,
+    maxPerMessageChars = 160,
+    excludeUserId = null,
+    excludeExactText = "",
+    commandPrefix = "!",
+} = {}) {
+    if (!Array.isArray(items) || items.length === 0) return "";
+
+    const prefix = String(commandPrefix || "!").trim();
+    const normalizedExcludeText = normalizeInlineText(excludeExactText);
+
+    const normalized = items
+        .map((msg) => {
+            if (!msg || typeof msg !== "object") return null;
+            const content = normalizeInlineText(msg.content);
+            if (!content) return null;
+            const authorUserId = msg.authorUserId ? String(msg.authorUserId) : "";
+            const createdAt = msg.createdAt ? new Date(msg.createdAt) : null;
+            return { authorUserId, content, createdAt };
+        })
+        .filter(Boolean)
+        .filter((msg) => {
+            if (!msg.content) return false;
+            if (prefix && msg.content.toLowerCase().startsWith(prefix.toLowerCase())) return false;
+            if (excludeUserId && msg.authorUserId && msg.authorUserId === String(excludeUserId)) {
+                if (normalizedExcludeText && msg.content === normalizedExcludeText) return false;
+            }
+            return true;
+        })
+        .sort((a, b) => {
+            const ta = a.createdAt ? a.createdAt.getTime() : 0;
+            const tb = b.createdAt ? b.createdAt.getTime() : 0;
+            return ta - tb;
+        });
+
+    if (normalized.length === 0) return "";
+
+    const lines = [];
+    let remaining = Math.max(200, Number(maxTotalChars) || 1200);
+    for (const msg of normalized) {
+        const authorSuffix = msg.authorUserId ? String(msg.authorUserId).slice(-4) : "????";
+        const safeContent = msg.content.length > maxPerMessageChars
+            ? `${msg.content.slice(0, maxPerMessageChars).trimEnd()}…`
+            : msg.content;
+        const line = `- u${authorSuffix}: ${safeContent}`;
+        if (line.length + 1 > remaining) break;
+        lines.push(line);
+        remaining -= (line.length + 1);
+        if (remaining <= 40) break;
+    }
+    if (!lines.length) return "";
+    return `RECENT_MESSAGES (ringkas):\n${lines.join("\n")}`;
 }
 
 /**
@@ -316,6 +384,7 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
         typeof runtimeConfig.ai_prompt_include_server_context === "boolean"
             ? runtimeConfig.ai_prompt_include_server_context
             : contextMode !== "minimal";
+    const historyMode = String(runtimeConfig.ai_history_mode || "").toLowerCase().trim() || (contextMode === "minimal" ? "tool" : "prefetch");
 
     // Default capabilities for backward compatibility (Full Access)
     const userCapabilities = context.capabilities || ["discord", "web", "memory", "session", "system", "reminder", "music", "social", "moderation"];
@@ -386,6 +455,67 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
         ...(replyContext && !replyAlreadyInHistory ? [{ role: "assistant", content: replyContext }] : []),
         { role: "user", content: userInput }
     ];
+
+    // Tool-first history: automatically fetch a small window of recent messages only when user explicitly asks for chat context.
+    if (
+        (historyMode === "tool" || historyMode === "minimal") &&
+        !messageHistory?.length &&
+        isExplicitHistoryRequest(userInput) &&
+        context?.channelId &&
+        allowedTools.some((t) => (t.function?.name || t.name) === "getRecentMessages")
+    ) {
+        const limit = safeClampInt(runtimeConfig.ai_history_tool_fetch_limit, 5, 30, 15);
+        const maxTotalChars = safeClampInt(runtimeConfig.ai_history_tool_max_chars, 400, 2400, 1200);
+        const maxPerMessageChars = safeClampInt(runtimeConfig.ai_history_tool_max_chars_per_message, 80, 320, 160);
+        const prefix = runtimeConfig.prefix || "!";
+
+        const toolCalls = [{
+            id: `call_${Date.now()}`,
+            type: "function",
+            function: {
+                name: "getRecentMessages",
+                arguments: JSON.stringify({
+                    channelId: context.channelId,
+                    limit,
+                }),
+            },
+        }];
+
+        try {
+            const toolResults = await handleToolCalls(toolCalls, context);
+            if (Array.isArray(toolResults) && toolResults.length === 1) {
+                let formatted = "";
+                try {
+                    const parsed = JSON.parse(toolResults[0].content);
+                    formatted = formatRecentMessagesForContext(parsed, {
+                        maxTotalChars,
+                        maxPerMessageChars,
+                        excludeUserId: context.userId || null,
+                        excludeExactText: userInput,
+                        commandPrefix: prefix,
+                    });
+                } catch (error) {
+                    formatted = "";
+                }
+                if (formatted) {
+                    toolResults[0].content = formatted;
+                }
+                conversationHistory = [
+                    { role: "system", content: systemMessage },
+                    // synthetic tool call + its (compacted) tool response, then the user prompt
+                    { role: "assistant", tool_calls: toolCalls },
+                    ...toolResults,
+                    ...(replyContext && !replyAlreadyInHistory ? [{ role: "assistant", content: replyContext }] : []),
+                    { role: "user", content: userInput },
+                ];
+            }
+        } catch (error) {
+            // Best-effort; if fetching fails, continue without extra context.
+            logger.debug("Auto history tool fetch failed; continuing without prefetched context.", {
+                message: error?.message || String(error),
+            });
+        }
+    }
 
     const directReply = tryBuildDirectReplyFromMusicBubble(userInput, context);
     if (directReply) {
