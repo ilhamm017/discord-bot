@@ -20,7 +20,7 @@ function getPrefix() {
   try {
     // Read lazily so tests can set env/config before requiring this module.
     // eslint-disable-next-line global-require
-    const config = require("../../config")();
+    const config = require("../../config/index.js")();
     const prefix = typeof config?.prefix === "string" ? config.prefix.trim() : "";
     return prefix || "yova";
   } catch {

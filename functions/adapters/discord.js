@@ -13,7 +13,7 @@ const {
     buildMemberListComponents,
     registerMemberListSession,
 } = require("../../discord/member_list");
-const getConfig = require("../../config");
+const getConfig = require("../../config/index.js");
 const config = getConfig();
 
 function getContextMode() {

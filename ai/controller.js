@@ -13,12 +13,14 @@ const COMPACT_SYSTEM_PROMPT = [
     "Jika tidak perlu aksi/tool, balas langsung ke pertanyaan user.",
     "Kalau butuh info server/musik/memori, pakai tool getServerInfo/getMusicStatus/getUserProfile/getUserMemory.",
     "Kalau user minta konteks chat/riwayat, pakai tool getRecentMessages/getMessagesAround/searchStoredMessages.",
+    "Kalau user minta info terbaru atau perlu verifikasi sumber, pakai tool searchWeb atau browserosSearch lalu browserosFetchPage.",
+    "Kalau user tanya error/masalah bot, pakai tool getRecentErrors dan/atau getRecentRuntimeIssues.",
     'Output wajib JSON valid: {"type":"final","message":"..."} atau {"type":"tool_call",...}.',
     "Jangan tampilkan JSON mentah atau detail teknis ke user.",
 ].join(" ");
 
 function readRuntimeConfig() {
-    const getConfig = require("../config");
+    const getConfig = require("../config/index.js");
     return getConfig({ fresh: true });
 }
 

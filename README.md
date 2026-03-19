@@ -33,6 +33,7 @@ Bot ini telah direfaktor untuk memisahkan tanggung jawab kode:
      "groq_api_key": "GROQ_API_KEY"
    }
    ```
+   Untuk deployment (mis. Docker/Server), kamu bisa pakai `config.local.json` (di-ignore) atau set `YOVA_CONFIG_PATH` agar menunjuk ke file config yang kamu mount.
    Opsional rollover key saat rate limit:
    ```json
    { "groq_api_keys": ["GROQ_KEY_1", "GROQ_KEY_2"] }
@@ -64,6 +65,8 @@ export GOOGLE_API_KEY=...
 export GROQ_API_KEY=...
 export SPOTIFY_CLIENT_ID=...
 export SPOTIFY_CLIENT_SECRET=...
+export BROWSER_AUTOMATION_ENABLED=true
+export BROWSER_AUTOMATION_BACKEND=playwright
 ```
 
 3. Build dan jalankan:
@@ -79,6 +82,7 @@ Catatan:
 - Jika ingin mengunci panel web, set env `CONFIG_WEB_TOKEN` sebelum menjalankan compose.
 - Setelah ada perubahan kode bot, rebuild image dengan `docker compose up -d --build`.
 - Jika pencarian lagu terasa terlalu cepat timeout, naikkan `music_search_timeout_ms` dari panel config atau `config.json`.
+- Untuk fitur browsing/search berbasis Chromium (Playwright), image akan mengunduh Chromium saat build.
 
 Perintah operasional:
 

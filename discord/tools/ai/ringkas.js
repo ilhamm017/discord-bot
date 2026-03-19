@@ -4,7 +4,7 @@ const { waitWithTyping } = require("../../../utils/common/typing");
 let config = {};
 
 try {
-  config = require("../../../config")();
+  config = require("../../../config/index.js")();
 } catch (error) {
   config = {};
 }

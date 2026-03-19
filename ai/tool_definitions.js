@@ -430,6 +430,60 @@ const tools = [
             tags: ["web"]
         }
     },
+    {
+        type: "function",
+        function: {
+            name: "browserosSearch",
+            description: "Search the web using server-side Chromium automation (Playwright). Use this when you need real-browser extraction (e.g., Google UI), or when searchWeb is blocked/limited.",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: { type: "string", description: "Search query text." },
+                    maxResults: { type: "integer", description: "Maximum number of results to return.", default: 5 },
+                    engine: { type: "string", description: "Search engine hint (google|duckduckgo).", default: "google" },
+                    hl: { type: "string", description: "Language hint (e.g., id, en)." },
+                    gl: { type: "string", description: "Country hint (e.g., id, us)." }
+                },
+                required: ["query"]
+            },
+            tags: ["web"]
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "browserosFetchPage",
+            description: "Open a URL using server-side Chromium automation (Playwright) and extract the page content as Markdown plus links. Use this to verify sources, summarize pages, or extract structured info from a specific URL.",
+            parameters: {
+                type: "object",
+                properties: {
+                    url: { type: "string", description: "The http/https URL to open." },
+                    maxChars: { type: "integer", description: "Maximum characters of Markdown to return.", default: 8000 }
+                },
+                required: ["url"]
+            },
+            tags: ["web"]
+        }
+    },
+    // --- Group E2: Runtime Errors ---
+    {
+        type: "function",
+        function: {
+            name: "getRecentErrors",
+            description: "Get the most recent runtime error/warn logs for diagnostics. Use when the user asks 'kenapa error', 'error terbaru', 'bot kenapa', or needs precise recent error details.",
+            parameters: {
+                type: "object",
+                properties: {
+                    limit: { type: "integer", description: "Maximum number of log entries.", default: 20 },
+                    includeLavalink: { type: "boolean", description: "Include Lavalink logs if available.", default: true },
+                    minLevel: { type: "string", description: "Minimum severity (error|warn).", default: "error" },
+                    maxChars: { type: "integer", description: "Maximum total chars to return.", default: 8000 },
+                    includeStack: { type: "boolean", description: "Include stack traces (redacted).", default: false }
+                }
+            },
+            tags: ["system"]
+        }
+    },
     // --- Group F: User Memory & Profiles ---
     {
         type: "function",

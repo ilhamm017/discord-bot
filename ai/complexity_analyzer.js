@@ -34,7 +34,7 @@ function analyzeComplexity(prompt, options = {}) {
 
     // 3. Keyword detection for complex tasks
     const complexKeywords = [
-        'analisis', 'analyze', 'ringkas', 'summarize', 'summary',
+        'analisis', 'analyze', 'ringkas', 'ringkasan', 'rangkum', 'rangkuman', 'summarize', 'summary',
         'jelaskan detail', 'explain in detail', 'bandingkan', 'compare',
         'evaluasi', 'evaluate', 'review', 'comprehensive',
         // Music commands need smarter models to avoid roleplaying vs tool use
@@ -74,7 +74,7 @@ function analyzeComplexity(prompt, options = {}) {
     const musicRegex = /\b(putar|putarkan|puter|putarin|puterin|play|setel|mainkan|lagu|music|nyanyi|dengar|skip|stop|pause|resume|next|prev|queue|antrian|lirik|lyric|song|track|mp3|playlist|shuffle|loop|repeat|semangat|mood|temani|audio|sound\s*effect|soundboard|sfx|efek\s+suara|myinstants?)\b/i;
     const searchRegex = /\b(cari|cariin|search|google|berita|terbaru|apa itu|siapa itu|crypto|harga|cuaca|weather|info|news|fakta|fact|definisi|artinya|kurs|saham|stock|internet)\b/i;
     const factualWhoRegex = /\bsiapa\b.*\b(presiden|menteri|ceo|pendiri|penemu|aktor|penyanyi|ibukota|ibu kota|negara|kota|tokoh)\b/i;
-    const historyRegex = /\b(chat|pesan|tadi|bahas apa|ngomong apa|riwayat|history|kemarin|tadi pagi|semalam|barusan|last message|msg|context|konteks|sebelumnya|dulu|salah|kesalahan|kenapa|ngapain)\b/i;
+    const historyRegex = /\b(chat|pesan|tadi|bahas apa|ngomong apa|riwayat|history|kemarin|tadi pagi|semalam|barusan|last message|msg|context|konteks|sebelumnya|dulu|salah|kesalahan|kenapa|ngapain|ringkas|ringkasan|rangkum|rangkuman|merangkum|summary|summarize)\b/i;
     const memberRegex = /\b(profil|role|pangkat|member|user|anggota|daftar member|lokasi member|jejak member|jointime|avatar|pfp|pp|foto profil|status member|activity|siapa saja|ada siapa|jumlah member|username)\b/i;
     const memberContextRegex = /\bsiapa\b.*\b(member|anggota|online|di server|di sini)\b/i;
     const modRegex = /\b(hapus|delete|ban|kick|timeout|mute|warn|peringatan|unban|unmute|clear|purge|bersihkan|nuke|prune|slowmode|lock|unlock)\b/i;
@@ -82,7 +82,16 @@ function analyzeComplexity(prompt, options = {}) {
     const gameRegex = /\b(tebak|teka-teki|riddle|puzzle|kuis|tebak-tebakan|permainan|jawab|siapakah aku|apa aku|tebak siapa)\b/i;
     const statsRegex = /\b(limit|token|stats|status ai|ping|latency|uptime|memory|cpu|usage|quota|kredit|credit|health|info bot|data|error|eror|masalah|bug|gangguan|diagnosa|diagnosis|troubleshoot|kenapa bot|kenapa error|cookies youtube|cookie youtube)\b/i;
     const socialRegex = /\b(bilang|bilangin|sampaikan|ucapkan|tanya|tanyain|panggil|greet|message|send|kirim|bisikin|bisik|katakan|kata|kasih tau|beritahukan|umumkan|pengumuman|announcement|announce|broadcast)\b/i;
-    const commandLikeRegex = /\b(putar|putarkan|play|skip|stop|pause|resume|ban|kick|timeout|hapus|delete|remind|ingatkan|cari|search|ringkas|rangkum|member|profil|role|join|leave|queue|antrian|kontrol|ucapkan|bilang|kirim|sound\s*effect|sfx|myinstants?)\b/i;
+    const commandLikeRegex = /\b(putar|putarkan|play|skip|stop|pause|resume|ban|kick|timeout|hapus|delete|remind|ingatkan|cari|search|ringkas|ringkasan|rangkum|rangkuman|member|profil|role|join|leave|queue|antrian|kontrol|ucapkan|bilang|kirim|sound\s*effect|sfx|myinstants?)\b/i;
+
+    const isSummaryRequest =
+        normalizedPrompt.includes("ringkas") ||
+        normalizedPrompt.includes("ringkasan") ||
+        normalizedPrompt.includes("rangkum") || // covers "rangkuman", "rangkumannya", "merangkum"
+        normalizedPrompt.includes("rangkuman") ||
+        normalizedPrompt.includes("merangkum") ||
+        normalizedPrompt.includes("summary") ||
+        normalizedPrompt.includes("summarize");
 
     let provider = 'groq'; // Default for general chat
     let intent = 'general';
@@ -152,7 +161,7 @@ function analyzeComplexity(prompt, options = {}) {
         !isCommandLike;
 
     // Explicit flags for data filtering
-    let needsHistory = historyRegex.test(normalizedPrompt);
+    let needsHistory = historyRegex.test(normalizedPrompt) || isSummaryRequest;
     const needsMentions = /(@|mention|panggil|tentang)/i.test(normalizedPrompt);
 
     const isMusic = musicRegex.test(normalizedPrompt);
@@ -200,19 +209,32 @@ function analyzeComplexity(prompt, options = {}) {
         routingConfidence = Math.min(routingConfidence, 0.35);
     }
 
-    let needsTool = (isMusic || isSearch || isMember || isMod || isReminder || isStats || isSocial) && !isGame;
+    let needsTool =
+        (isMusic || isSearch || isMember || isMod || isReminder || isStats || isSocial) && !isGame;
+    if (isSummaryRequest) {
+        needsTool = true; // allow getRecentMessages/searchStoredMessages for accurate summaries
+    }
 
     // Intent Inheritance/Override:
     // If the prompt is short and we are replying to a question, check if the PREVIOUS intent was something specific.
     // Skip this if it's just a simple acknowledgment ("thanks", "ok")
-    if (!needsTool && !isGame && wordCount <= 5 && isReplyingToQuestion && !isAcknowledgement) {
-        if (musicRegex.test(lastAssistantMsgLower)) {
+    if (!isGame && wordCount <= 5 && isReplyingToQuestion && !isAcknowledgement) {
+        // Summary request should not inherit prior "search/music" intent.
+        if (isSummaryRequest) {
+            intent = 'history';
+            needsTool = true;
+            provider = 'groq';
+            needsHistory = true;
+            routingConfidence = Math.max(routingConfidence, 0.7);
+        }
+
+        if (!isSummaryRequest && musicRegex.test(lastAssistantMsgLower)) {
             intent = 'music';
             needsTool = true;
             provider = 'groq';
             needsHistory = true; // Force history to understand the reply
             routingConfidence = Math.max(routingConfidence, 0.7);
-        } else if (searchRegex.test(lastAssistantMsgLower) && !/setan|hantu|canda/i.test(normalizedPrompt)) {
+        } else if (!isSummaryRequest && searchRegex.test(lastAssistantMsgLower) && !/setan|hantu|canda/i.test(normalizedPrompt)) {
             // Only inherit search if it's not a jokey follow up
             intent = 'search';
             needsTool = true;

@@ -211,6 +211,9 @@ async function callTool(name, args, context = {}) {
             case 'sendAnnouncement': result = await platform.sendAnnouncement(cid, args.title, args.body, args.fields, args.footer); break;
 
             case 'searchWeb': result = await platform.searchWeb(args.query, args.maxResults, args.safeSearch); break;
+            case 'browserosSearch': result = await platform.browserosSearch(gid, targetUid, args.query, { engine: args.engine, maxResults: args.maxResults, hl: args.hl, gl: args.gl }); break;
+            case 'browserosFetchPage': result = await platform.browserosFetchPage(gid, targetUid, args.url, { maxChars: args.maxChars }); break;
+            case 'getRecentErrors': result = await platform.getRecentErrors(args.limit, args.includeLavalink !== false, { minLevel: args.minLevel, maxChars: args.maxChars, includeStack: args.includeStack }); break;
             case 'getRecentRuntimeIssues': result = await platform.getRecentRuntimeIssues(args.limit, args.includeLavalink); break;
 
             case 'getUserProfile': result = await platform.getUserProfile(gid, targetUid); break;

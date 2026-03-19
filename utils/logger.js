@@ -1,7 +1,7 @@
 const winston = require("winston");
 const path = require("path");
 const fs = require("fs");
-const getConfig = require("../config");
+const getConfig = require("../config/index.js");
 
 const logDir = path.resolve(process.cwd(), "logs");
 

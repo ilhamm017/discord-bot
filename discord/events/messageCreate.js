@@ -1,9 +1,10 @@
 const logger = require("../../utils/logger");
 const { handleDiscordMessage } = require("../../functions/adapters/discord");
 const platform = require("../../functions/platform");
-const getConfig = require("../../config");
+const getConfig = require("../../config/index.js");
 const config = getConfig();
 const { prefix = "!" } = config;
+const { resolveCommandAlias } = require("../command_aliases");
 
 module.exports = {
     name: "messageCreate",
@@ -132,7 +133,11 @@ module.exports = {
         if (!commandName) return;
 
         // 4. Execute Command
-        const command = client.commands.get(commandName);
+        const alias = resolveCommandAlias(commandName, args);
+        const effectiveCommandName = alias?.name || commandName;
+        const effectiveArgs = alias?.args || args;
+
+        const command = client.commands.get(effectiveCommandName);
         if (!command) {
             // Fallback: If command not found, treat as AI prompt
             const prompt = rest.trim();
@@ -141,10 +146,10 @@ module.exports = {
         }
 
         try {
-            await command.execute(message, args);
+            await command.execute(message, effectiveArgs);
         } catch (error) {
             logger.error(
-                `Command ${commandName} error (guild ${message.guild?.id || "dm"})`,
+                `Command ${effectiveCommandName} error (guild ${message.guild?.id || "dm"})`,
                 error
             );
             await message.reply("Terjadi error saat menjalankan perintah.");

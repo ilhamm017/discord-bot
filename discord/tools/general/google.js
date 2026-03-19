@@ -1,5 +1,5 @@
 const platform = require("../../../functions/platform");
-const getConfig = require("../../../config");
+const getConfig = require("../../../config/index.js");
 const config = getConfig();
 
 function clampInt(value, min, max, fallback) {
@@ -43,16 +43,36 @@ module.exports = {
   description: "Cari info terbaru di web (Google CSE jika dikonfigurasi; fallback ke DuckDuckGo).",
   async execute(message, args) {
     const query = args.join(" ").trim();
-    const prefix = String(config.prefix || "yova").trim() || "yova";
+    const runtimeConfig = getConfig({ fresh: true });
+    const prefix = String(runtimeConfig.prefix || "yova").trim() || "yova";
 
     if (!query) {
       return message.reply(`Format: \`${prefix} google <kata kunci>\``);
     }
 
-    const maxResults = clampInt(config.web_search_max_results_default, 1, 8, 5);
-    const safeSearch = clampInt(config.web_search_safe_default, 0, 2, 1);
+    const maxResults = clampInt(runtimeConfig.web_search_max_results_default, 1, 8, 5);
+    const safeSearch = clampInt(runtimeConfig.web_search_safe_default, 0, 2, 1);
 
-    const results = await platform.searchWeb(query, maxResults, safeSearch);
+    let results = [];
+    const browserEnabled =
+      typeof runtimeConfig.browser_automation_enabled === "boolean"
+        ? runtimeConfig.browser_automation_enabled
+        : runtimeConfig.browseros_mcp_enabled !== false;
+    if (browserEnabled) {
+      try {
+        results = await platform.browserosSearch(
+          message.guild?.id || "dm",
+          message.author?.id,
+          query,
+          { engine: "google", maxResults }
+        );
+      } catch (error) {
+        // fallback to existing web search
+        results = await platform.searchWeb(query, maxResults, safeSearch);
+      }
+    } else {
+      results = await platform.searchWeb(query, maxResults, safeSearch);
+    }
     const header = `Hasil pencarian untuk: **${query}**`;
     const body = formatResults(results);
 

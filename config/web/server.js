@@ -3,9 +3,12 @@ const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
 const { connectDB } = require("../../storage/sequelize");
+const configModule = require("../../config/index.js");
 
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
-const CONFIG_PATH = path.join(ROOT_DIR, "config.json");
+const CONFIG_PATH = typeof configModule.getConfigFilePath === "function"
+    ? configModule.getConfigFilePath()
+    : path.join(ROOT_DIR, "config.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATA_DIR = path.join(ROOT_DIR, ".data");
 const CONFIG_BACKUP_DIR = process.env.CONFIG_BACKUP_DIR
@@ -22,6 +25,12 @@ const {
     restartLavalinkProcess,
 } = require("./lavalink_control");
 const { getRecentRuntimeIssues } = require("../../functions/platform/core_logic");
+const { getRateLimitStatus } = require("../../ai/model_selector");
+const { getRateLimiter } = require("../../ai/rate_limiter");
+const {
+    getConfiguredGroqKeys,
+    getKeyStatus,
+} = require("../../ai/groq_key_pool");
 
 const HOST = process.env.CONFIG_WEB_HOST || "127.0.0.1";
 const PORT = Number(process.env.CONFIG_WEB_PORT || 3210);
@@ -67,7 +76,12 @@ function assertSafeObject(value, pathStack = []) {
 }
 
 function readConfig() {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    try {
+        if (!fs.existsSync(CONFIG_PATH)) return {};
+        return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    } catch {
+        return {};
+    }
 }
 
 function buildEditableConfig(config) {
@@ -86,9 +100,12 @@ function writeConfig(nextConfig) {
     const backupName = `config.backup.${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
     fs.mkdirSync(CONFIG_BACKUP_DIR, { recursive: true });
     const backupPath = path.join(CONFIG_BACKUP_DIR, backupName);
-    fs.copyFileSync(CONFIG_PATH, backupPath);
+    if (fs.existsSync(CONFIG_PATH)) {
+        fs.copyFileSync(CONFIG_PATH, backupPath);
+    }
 
     const payload = `${JSON.stringify(nextConfig, null, 2)}\n`;
+    fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
     fs.writeFileSync(CONFIG_PATH, payload, "utf8");
     return backupName;
 }
@@ -301,6 +318,43 @@ const server = http.createServer(async (req, res) => {
                 ok: true,
                 cookies: getCookiesStatus(config),
                 health: await getCookiesHealth(config),
+            });
+            return;
+        }
+
+        if (method === "GET" && pathname === "/api/ai-limits") {
+            if (!isAuthorized(req)) {
+                sendJson(res, 401, { ok: false, error: "Unauthorized (invalid token)." });
+                return;
+            }
+
+            const config = readConfig();
+
+            const googleModelCooldowns = getRateLimitStatus();
+            const tokenLimiter = getRateLimiter().getStats();
+
+            const groqKeys = getConfiguredGroqKeys(config, process.env);
+            const groqKeyStatus = getKeyStatus(groqKeys).map((row) => {
+                const key = String(row.key || "");
+                const suffix = key.length >= 6 ? key.slice(-6) : key.slice(-4);
+                return {
+                    keySuffix: suffix ? `…${suffix}` : "…",
+                    blocked: Boolean(row.blocked),
+                    remainingMs: Math.max(0, Number(row.remainingMs) || 0),
+                    reason: String(row.reason || ""),
+                };
+            });
+
+            sendJson(res, 200, {
+                ok: true,
+                now: new Date().toISOString(),
+                google: {
+                    modelCooldowns: googleModelCooldowns,
+                    tokenLimiter,
+                },
+                groq: {
+                    keys: groqKeyStatus,
+                },
             });
             return;
         }

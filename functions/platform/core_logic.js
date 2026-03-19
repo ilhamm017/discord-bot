@@ -23,7 +23,7 @@ const execPromise = util.promisify(exec);
  * Note: Uses native fetch (Node 18+).
  */
 function readRootConfig() {
-    const getConfig = require("../../config");
+    const getConfig = require("../../config/index.js");
     return getConfig({ fresh: true });
 }
 
@@ -290,6 +290,152 @@ function parseRuntimeLogTimestamp(line) {
     }
 
     return null;
+}
+
+function redactSecretsInText(text) {
+    let s = String(text || "");
+    if (!s) return s;
+
+    const replacements = [
+        // Discord tokens (very common shape)
+        { re: /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}/g, to: "[REDACTED_DISCORD_TOKEN]" },
+        // Google API key prefix
+        { re: /\bAIza[0-9A-Za-z\-_]{20,}\b/g, to: "[REDACTED_GOOGLE_KEY]" },
+        // Groq key prefix (common)
+        { re: /\bgsk_[0-9A-Za-z]{10,}\b/g, to: "[REDACTED_GROQ_KEY]" },
+        // Generic "Authorization: Bearer ..."
+        { re: /\bAuthorization:\s*Bearer\s+[^\s]+/gi, to: "Authorization: Bearer [REDACTED]" },
+        // "x-config-token" header
+        { re: /\bx-config-token\b\s*:\s*[^\s]+/gi, to: "x-config-token: [REDACTED]" },
+    ];
+
+    for (const { re, to } of replacements) {
+        s = s.replace(re, to);
+    }
+    return s;
+}
+
+function redactSecretsDeep(value) {
+    if (typeof value === "string") return redactSecretsInText(value);
+    if (Array.isArray(value)) return value.map(redactSecretsDeep);
+    if (!value || typeof value !== "object") return value;
+
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+        out[k] = redactSecretsDeep(v);
+    }
+    return out;
+}
+
+function parseJsonLine(line) {
+    const text = String(line || "").trim();
+    if (!text) return null;
+    if (!(text.startsWith("{") && text.endsWith("}"))) return null;
+    try {
+        const obj = JSON.parse(text);
+        return obj && typeof obj === "object" ? obj : null;
+    } catch {
+        return null;
+    }
+}
+
+function levelRank(level) {
+    const l = String(level || "").toLowerCase();
+    if (l === "error") return 3;
+    if (l === "warn" || l === "warning") return 2;
+    if (l === "info") return 1;
+    return 0;
+}
+
+async function getRecentErrors(limit = 20, includeLavalink = true, options = {}) {
+    try {
+        const lim = Number.isInteger(limit) ? Math.max(1, Math.min(limit, 80)) : 20;
+        const maxChars = Number.isInteger(options.maxChars) ? Math.max(400, Math.min(options.maxChars, 30_000)) : 8000;
+        const includeStack = options.includeStack === true;
+        const minLevel = String(options.minLevel || "error").toLowerCase();
+        const minRank = levelRank(minLevel);
+
+        const scannedFiles = getRuntimeDiagnosticLogFiles(includeLavalink);
+        const items = [];
+
+        // Read more lines than limit because we filter by severity
+        const perFileRead = Math.max(80, lim * 8);
+        for (const filePath of scannedFiles) {
+            const lines = readLastLines(filePath, perFileRead);
+            for (const line of lines) {
+                const timestamp = parseRuntimeLogTimestamp(line);
+                const json = parseJsonLine(line);
+
+                if (json) {
+                    const lvl = String(json.level || "").toLowerCase();
+                    if (levelRank(lvl) < minRank) continue;
+
+                    const safe = redactSecretsDeep(json);
+                    const entry = {
+                        source: path.basename(filePath),
+                        file: filePath,
+                        timestamp: safe.timestamp || (timestamp ? timestamp.toISOString() : null),
+                        level: lvl || "error",
+                        message: redactSecretsInText(safe.message || ""),
+                    };
+                    if (includeStack && safe.stack) entry.stack = redactSecretsInText(safe.stack);
+                    // include a tiny bit of context when available
+                    for (const key of ["code", "name", "url", "title", "model"]) {
+                        if (safe[key] != null && entry[key] == null) entry[key] = safe[key];
+                    }
+                    items.push(entry);
+                    continue;
+                }
+
+                // plain-text fallback: pick lines that look like errors/warnings
+                const lower = String(line).toLowerCase();
+                const inferredLevel =
+                    lower.includes("error") || lower.includes("failed") || lower.includes("exception") ? "error"
+                        : lower.includes("warn") || lower.includes("warning") ? "warn"
+                            : "";
+                if (!inferredLevel || levelRank(inferredLevel) < minRank) continue;
+
+                items.push({
+                    source: path.basename(filePath),
+                    file: filePath,
+                    timestamp: timestamp ? timestamp.toISOString() : null,
+                    level: inferredLevel,
+                    message: redactSecretsInText(String(line).trim()),
+                });
+            }
+        }
+
+        items.sort((a, b) => {
+            const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return tb - ta;
+        });
+
+        // Trim by total chars
+        const out = [];
+        let remaining = maxChars;
+        for (const item of items) {
+            const compact = JSON.stringify(item);
+            if (compact.length + 2 > remaining) break;
+            out.push(item);
+            remaining -= (compact.length + 2);
+            if (out.length >= lim) break;
+        }
+
+        return {
+            status: out.length ? "ok" : "no_recent_error_detected",
+            scannedFiles,
+            items: out,
+        };
+    } catch (error) {
+        logger.error(`Error in getRecentErrors: ${error.message}`);
+        return {
+            status: "failed",
+            error: error.message,
+            scannedFiles: [],
+            items: [],
+        };
+    }
 }
 
 function getRuntimeDiagnosticsReferenceNow() {
@@ -777,6 +923,7 @@ async function logActionAudit(guildId, actorUserId, actionType, status, targetUs
 
 module.exports = {
     searchWeb,
+    getRecentErrors,
     getRecentRuntimeIssues,
     getUserProfile,
     setUserProfile,

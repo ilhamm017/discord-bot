@@ -11,7 +11,7 @@ const DEFAULT_TIER = "balanced";
 function getConfig() {
 let config = {};
 try {
-        config = require("../config")();
+        config = require("../config/index.js")();
 } catch (error) {
         config = {};
 }
@@ -285,10 +285,10 @@ const INTENT_TOOL_NAME_ALLOWLIST = {
     history: ['getRecentMessages', 'getMessagesBefore', 'getMessagesAfter', 'getMessagesAround', 'getMessageById', 'getLastMessageByUser', 'searchStoredMessages'],
     moderation: ['deleteMessage', 'bulkDeleteMessages', 'timeoutMember', 'removeTimeout', 'banMember', 'unbanMember'],
     reminder: ['createReminder', 'listUserReminders', 'cancelReminder'],
-    search: ['searchWeb'],
+    search: ['searchWeb', 'browserosSearch', 'browserosFetchPage'],
     social: ['sendMessage', 'replyToMessage', 'sendAnnouncement', 'locateUser', 'findUserLocation', 'getServerInfo'],
     music: ['playMusic', 'controlMusic', 'getMusicStatus', 'getRecentRuntimeIssues'],
-    stats: ['getAiStats', 'getServerInfo', 'getRecentRuntimeIssues']
+    stats: ['getAiStats', 'getServerInfo', 'getRecentRuntimeIssues', 'getRecentErrors']
 };
 
 function filterToolsByIntent(intent, tools) {

@@ -27,7 +27,7 @@ const activeSpeechLocks = new Set();
 
 function readRuntimeConfig() {
     try {
-        const getConfig = require("../../config");
+        const getConfig = require("../../config/index.js");
         return getConfig({ fresh: true });
     } catch (error) {
         return {};

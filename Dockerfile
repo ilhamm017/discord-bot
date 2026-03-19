@@ -20,6 +20,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
+# Playwright (Chromium) for server-side browsing/search
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx playwright install --with-deps chromium
+
 COPY . .
 
 RUN chmod +x /app/docker/entrypoint.sh /app/docker/install-lavalink.sh \

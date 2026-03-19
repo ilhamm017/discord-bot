@@ -10,6 +10,7 @@ services:
     environment:
       TZ: Asia/Jakarta
       NODE_ENV: production
+      YOVA_CONFIG_PATH: /app/config.local.json
       CONFIG_WEB_HOST: 0.0.0.0
       CONFIG_WEB_PORT: 3210
       CONFIG_WEB_TOKEN: ${CONFIG_WEB_TOKEN:-}
@@ -18,6 +19,9 @@ services:
       AUDIO_CACHE_HOST: 127.0.0.1
       AUDIO_CACHE_PORT: 3211
       AUDIO_CACHE_PLAYBACK_MODE: local
+      BROWSER_AUTOMATION_ENABLED: "true"
+      BROWSER_AUTOMATION_BACKEND: playwright
+      BROWSER_AUTOMATION_TIMEOUT_MS: 15000
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
@@ -26,7 +30,7 @@ services:
     ports:
       - "3210:3210"
     volumes:
-      - ./config.json:/app/config.json
+      - ./config.json:/app/config.local.json
       - ./database.sqlite:/app/database.sqlite
       - ./.data:/app/.data
       - ./logs:/app/logs

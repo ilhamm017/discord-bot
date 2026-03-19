@@ -1,4 +1,4 @@
-const config = require("./config")();
+const config = require("./config/index.js")();
 const apiKey = config.google_api_key || process.env.GOOGLE_API_KEY;
 
 const modelsToTest = [

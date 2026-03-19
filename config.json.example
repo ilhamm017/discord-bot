@@ -14,12 +14,12 @@
   "web_search_timeout_ms": 10000,
   "web_search_max_results_default": 5,
   "web_search_safe_default": 1,
-  "browseros_mcp_url": "http://127.0.0.1:9239/mcp",
-  "browseros_mcp_enabled": true,
-  "browseros_timeout_ms": 15000,
+  "browser_automation_enabled": true,
+  "browser_automation_backend": "playwright",
+  "browser_automation_timeout_ms": 15000,
   "browseros_max_results_default": 5,
   "browseros_search_engine": "google",
-  "browseros_rate_limit_per_user_ms": 8000,
-  "browseros_allowlist_domains": []
+  "browser_automation_rate_limit_per_user_ms": 8000,
+  "browser_automation_allowlist_domains": [],
+  "browser_fetch_max_chars": 8000
 }
-

@@ -32,7 +32,7 @@ fs.writeFileSync(
 process.env.RUNTIME_DIAGNOSTIC_LOG_FILES = `${botLog},${lavalinkLog}`;
 process.env.RUNTIME_DIAGNOSTIC_NOW = "2026-03-08T10:12:00+07:00";
 
-const { getRecentRuntimeIssues } = require("../functions/platform/core_logic");
+const { getRecentRuntimeIssues, getRecentErrors } = require("../functions/platform/core_logic");
 
 async function runCase(name, fn) {
   await fn();
@@ -96,6 +96,29 @@ runCase("getRecentRuntimeIssues suppresses cookie issue when newer playback reco
 
   assert.strictEqual(result.status, "no_recent_issue_detected");
   assert.ok(!kinds.includes("youtube_cookies_invalid"));
+});
+
+runCase("getRecentErrors returns recent error lines and redacts secrets", async () => {
+  fs.writeFileSync(
+    botLog,
+    [
+      "{\"timestamp\":\"2026-03-08T03:16:25.084Z\",\"level\":\"error\",\"message\":\"Failed to login to Discord.\",\"stack\":\"Error [TokenInvalid]: token MTQ6MTIzNDU2Nzg5MC5hYmNkZWYuMTIzNDU2Nzg5MGFiY2RlZg==\"}",
+      "{\"timestamp\":\"2026-03-08T03:16:26.084Z\",\"level\":\"warn\",\"message\":\"Groq key gsk_0123456789abcdef rate limited\"}",
+      "[2026-03-08 10:11:25] error: Playback failed, auto-skipping track. AIzaSyABCDEF1234567890abcdefghi",
+    ].join("\n"),
+    "utf8"
+  );
+
+  const result = await getRecentErrors(10, false, { minLevel: "warn", includeStack: true, maxChars: 4000 });
+  assert.ok(["ok", "no_recent_error_detected"].includes(result.status));
+  assert.ok(Array.isArray(result.items));
+  assert.ok(result.items.length >= 2);
+
+  const joined = JSON.stringify(result.items);
+  assert.ok(!joined.includes("gsk_0123456789abcdef"), "expected groq key to be redacted");
+  assert.ok(!joined.includes("AIzaSyABCDEF"), "expected google key to be redacted");
+  assert.ok(joined.includes("[REDACTED_GROQ_KEY]") || joined.includes("[REDACTED_GOOGLE_KEY]"), "expected redaction markers");
+  console.log("PASS: getRecentErrors returns and redacts secrets");
 });
 
 console.log("\nRuntime diagnostics regression passed");

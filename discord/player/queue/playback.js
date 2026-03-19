@@ -16,7 +16,7 @@ const { isYoutubeCookiesError } = require("../../../utils/common/youtube_error")
 let config = {};
 try {
     // eslint-disable-next-line global-require
-    config = require("../../../config")();
+    config = require("../../../config/index.js")();
 } catch (error) {
     config = {};
 }

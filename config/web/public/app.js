@@ -32,6 +32,7 @@ let rawConfig = {};
 let rawConfigNotes = {};
 let rawLavalinkConfig = {};
 let rawElevenLabsUsage = null;
+let rawAiLimits = null;
 let activeTabId = "general";
 const fieldRegistry = new Map();
 const lavalinkFieldRegistry = new Map();
@@ -149,6 +150,24 @@ function buildTabPanels(targetEl) {
         panel.hidden = tab.id !== activeTabId;
         targetEl.append(panel);
         panels.set(tab.id, panel);
+    }
+
+    const aiPanel = panels.get("ai");
+    if (aiPanel) {
+        const summary = document.createElement("section");
+        summary.id = "aiLimitSummary";
+        summary.className = "voice-ai-summary";
+        summary.innerHTML = `
+            <div class="voice-ai-summary-head">
+                <div>
+                    <p class="badge">AI LIMIT</p>
+                    <h3>Status Rate Limit</h3>
+                </div>
+                <button id="aiLimitRefreshBtn" type="button" class="tab-button">Refresh</button>
+            </div>
+            <p class="voice-ai-summary-copy">Memuat status cooldown model dan key...</p>
+        `;
+        aiPanel.append(summary);
     }
 
     const voiceAiPanel = panels.get("voice_ai");
@@ -290,6 +309,10 @@ function setActiveTab(tabId) {
     activeTabId = CONFIG_TABS.some((tab) => tab.id === tabId) ? tabId : "general";
     renderTabBar();
     updateVisibleSections();
+
+    if (activeTabId === "ai") {
+        loadAiLimitStatus().catch(() => { });
+    }
 }
 
 function readEditorValue(key, editor) {
@@ -434,6 +457,99 @@ function renderVoiceAiSummary() {
     `;
 }
 
+function renderAiLimitSummary() {
+    const summaryEl = document.getElementById("aiLimitSummary");
+    if (!summaryEl) return;
+
+    const refreshBtn = document.getElementById("aiLimitRefreshBtn");
+    if (refreshBtn) {
+        refreshBtn.onclick = async () => {
+            try {
+                refreshBtn.disabled = true;
+                await loadAiLimitStatus();
+            } catch (error) {
+                // ignore; loader already renders state
+            } finally {
+                refreshBtn.disabled = false;
+            }
+        };
+    }
+
+    if (!rawAiLimits) {
+        summaryEl.innerHTML = `
+            <div class="voice-ai-summary-head">
+                <div>
+                    <p class="badge">AI LIMIT</p>
+                    <h3>Status Rate Limit</h3>
+                </div>
+                <button id="aiLimitRefreshBtn" type="button" class="tab-button">Refresh</button>
+            </div>
+            <p class="voice-ai-summary-copy">Status belum tersedia.</p>
+        `;
+        return;
+    }
+
+    const now = rawAiLimits.now ? new Date(rawAiLimits.now).toLocaleString("id-ID") : "-";
+    const tokenLimiter = rawAiLimits.google?.tokenLimiter || null;
+
+    const modelCooldowns = rawAiLimits.google?.modelCooldowns && typeof rawAiLimits.google.modelCooldowns === "object"
+        ? rawAiLimits.google.modelCooldowns
+        : {};
+
+    const blockedModels = Object.entries(modelCooldowns)
+        .filter(([, v]) => v && v.blocked)
+        .map(([model, v]) => ({
+            model,
+            remainingMs: Number(v.remainingMs) || 0,
+            remainingMinutes: Number(v.remainingMinutes) || 0,
+        }))
+        .sort((a, b) => b.remainingMs - a.remainingMs)
+        .slice(0, 12);
+
+    const groqKeys = Array.isArray(rawAiLimits.groq?.keys) ? rawAiLimits.groq.keys : [];
+    const blockedKeys = groqKeys
+        .filter((k) => k && k.blocked)
+        .map((k) => ({
+            keySuffix: String(k.keySuffix || "…"),
+            remainingMs: Number(k.remainingMs) || 0,
+            reason: String(k.reason || ""),
+        }))
+        .sort((a, b) => b.remainingMs - a.remainingMs)
+        .slice(0, 12);
+
+    const tokenLimiterLine = tokenLimiter
+        ? `TPM: ${formatInt(tokenLimiter.currentTPM)} / ${formatInt(tokenLimiter.maxTPM)} | Queue: ${formatInt(tokenLimiter.queueLength)} | Active: ${formatInt(tokenLimiter.activeRequests)}`
+        : "TPM limiter: -";
+
+    const modelsHtml = blockedModels.length
+        ? `<div class="voice-ai-stat"><span class="voice-ai-stat-label">Google model cooldown</span><strong>${blockedModels.length} model</strong><div class="voice-ai-summary-meta">${blockedModels
+            .map((m) => `${m.model} (${Math.ceil(m.remainingMs / 1000)}s)`)
+            .join("<br/>")}</div></div>`
+        : `<div class="voice-ai-stat"><span class="voice-ai-stat-label">Google model cooldown</span><strong>0</strong></div>`;
+
+    const keysHtml = blockedKeys.length
+        ? `<div class="voice-ai-stat"><span class="voice-ai-stat-label">Groq key cooldown</span><strong>${blockedKeys.length} key</strong><div class="voice-ai-summary-meta">${blockedKeys
+            .map((k) => `${k.keySuffix} (${Math.ceil(k.remainingMs / 1000)}s)${k.reason ? ` - ${k.reason}` : ""}`)
+            .join("<br/>")}</div></div>`
+        : `<div class="voice-ai-stat"><span class="voice-ai-stat-label">Groq key cooldown</span><strong>0</strong></div>`;
+
+    summaryEl.innerHTML = `
+        <div class="voice-ai-summary-head">
+            <div>
+                <p class="badge">AI LIMIT</p>
+                <h3>Status Rate Limit</h3>
+            </div>
+            <button id="aiLimitRefreshBtn" type="button" class="tab-button">Refresh</button>
+        </div>
+        <p class="voice-ai-summary-copy">${tokenLimiterLine}</p>
+        <p class="voice-ai-summary-meta">Update: ${now}</p>
+        <div class="voice-ai-summary-grid">
+            ${modelsHtml}
+            ${keysHtml}
+        </div>
+    `;
+}
+
 async function loadCookiesStatus() {
     setCookiesStatus("Memeriksa status cookies...");
     const response = await fetch("/api/ytdlp-cookies", {
@@ -484,6 +600,32 @@ function readSelectedCookiesFile() {
         reader.onerror = () => reject(new Error("Gagal membaca file cookies.txt."));
         reader.readAsText(file);
     });
+}
+
+async function loadAiLimitStatus() {
+    const summaryEl = document.getElementById("aiLimitSummary");
+    if (summaryEl && !rawAiLimits) {
+        summaryEl.querySelector(".voice-ai-summary-copy")?.replaceWith(Object.assign(document.createElement("p"), {
+            className: "voice-ai-summary-copy",
+            textContent: "Memuat status cooldown model dan key...",
+        }));
+    }
+
+    const response = await fetch("/api/ai-limits", {
+        headers: {
+            ...getTokenHeader(),
+        },
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+        rawAiLimits = null;
+        renderAiLimitSummary();
+        throw new Error(data.error || "Gagal memuat status AI limits.");
+    }
+
+    rawAiLimits = data;
+    renderAiLimitSummary();
 }
 
 async function uploadCookiesFile() {
@@ -626,6 +768,7 @@ async function restartLavalink() {
 
 async function reloadAll() {
     await loadConfig();
+    await loadAiLimitStatus();
     await loadElevenLabsUsageStatus();
     await loadCookiesStatus();
     await loadLavalinkConfig();

@@ -54,13 +54,14 @@ function applyEnvOverrides(config) {
     google_cse_api_key: ["GOOGLE_CSE_API_KEY"],
     google_cse_cx: ["GOOGLE_CSE_CX"],
 
-    browseros_mcp_url: ["BROWSEROS_MCP_URL"],
-    browseros_mcp_enabled: ["BROWSEROS_MCP_ENABLED"],
-    browseros_timeout_ms: ["BROWSEROS_TIMEOUT_MS"],
+    browser_automation_enabled: ["BROWSER_AUTOMATION_ENABLED", "BROWSEROS_MCP_ENABLED"],
+    browser_automation_backend: ["BROWSER_AUTOMATION_BACKEND"],
+    browser_automation_timeout_ms: ["BROWSER_AUTOMATION_TIMEOUT_MS"],
     browseros_max_results_default: ["BROWSEROS_MAX_RESULTS_DEFAULT"],
     browseros_search_engine: ["BROWSEROS_SEARCH_ENGINE"],
-    browseros_rate_limit_per_user_ms: ["BROWSEROS_RATE_LIMIT_PER_USER_MS"],
-    browseros_allowlist_domains: ["BROWSEROS_ALLOWLIST_DOMAINS"],
+    browser_automation_rate_limit_per_user_ms: ["BROWSER_AUTOMATION_RATE_LIMIT_PER_USER_MS", "BROWSEROS_RATE_LIMIT_PER_USER_MS"],
+    browser_automation_allowlist_domains: ["BROWSER_AUTOMATION_ALLOWLIST_DOMAINS"],
+    browser_fetch_max_chars: ["BROWSER_FETCH_MAX_CHARS"],
   };
 
   for (const [key, envNames] of Object.entries(map)) {
@@ -135,4 +136,3 @@ module.exports = getConfig;
 module.exports.getConfig = getConfig;
 module.exports.getConfigFilePath = getConfigFilePath;
 module.exports.readConfigFile = () => readJsonFile(getConfigFilePath());
-

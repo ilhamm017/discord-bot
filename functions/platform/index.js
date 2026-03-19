@@ -3,11 +3,13 @@ const identity = require("./identity_logic");
 const core = require("./core_logic");
 const policy = require("./policy_logic");
 const music = require("./music_logic");
+const browseros = require("./browseros_logic");
 
 module.exports = {
     ...chat,
     ...identity,
     ...core,
     ...policy,
-    ...music
+    ...music,
+    ...browseros
 };

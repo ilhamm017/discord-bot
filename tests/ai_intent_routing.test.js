@@ -73,6 +73,22 @@ const cases = [
     },
   },
   {
+    name: "Summary question should route to history tools",
+    input: "apa rangkumannya ?",
+    options: {
+      messages: [
+        { role: "assistant", content: "ini contoh jawaban sebelumnya tentang harga crypto", timestamp: Date.now() },
+        { role: "user", content: "ok", timestamp: Date.now() },
+      ],
+    },
+    expect: {
+      intent: "history",
+      provider: "groq",
+      needsTool: true,
+      isAmbiguous: false,
+    },
+  },
+  {
     name: "Member presence query should route to member intent",
     input: "siapa aja member online",
     options: { messages: [] },
