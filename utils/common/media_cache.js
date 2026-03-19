@@ -11,7 +11,7 @@ const DEFAULT_CACHE_HOST = "127.0.0.1";
 const DEFAULT_CACHE_PORT = 3211;
 let config = {};
 try {
-    config = require(path.join(process.cwd(), "config.json"));
+    config = require("../../config")();
 } catch (error) {
     config = {};
 }

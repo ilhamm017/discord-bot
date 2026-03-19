@@ -1,17 +1,12 @@
 const winston = require("winston");
 const path = require("path");
 const fs = require("fs");
+const getConfig = require("../config");
 
 const logDir = path.resolve(process.cwd(), "logs");
-const configPath = path.resolve(process.cwd(), "config.json");
 
 function readLoggerConfig() {
-  try {
-    if (!fs.existsSync(configPath)) return {};
-    return JSON.parse(fs.readFileSync(configPath, "utf8"));
-  } catch {
-    return {};
-  }
+  return getConfig({ fresh: true });
 }
 
 function getStringSetting(envValue, configValue, fallback) {

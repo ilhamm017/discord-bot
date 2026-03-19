@@ -3,6 +3,7 @@ node_modules/
 .data/
 
 config.json
+config.local.json
 config.backup.*.json
 
 database.sqlite

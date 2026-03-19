@@ -14,7 +14,7 @@ const { getState } = require("../../discord/player/queue");
 let config = {};
 
 try {
-  config = require("../../config.json");
+  config = require("../../config")();
 } catch (error) {
   config = {};
 }

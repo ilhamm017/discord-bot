@@ -1,0 +1,25 @@
+{
+  "token": "",
+  "prefix": "yova",
+  "google_api_key": "",
+  "groq_api_key": "",
+  "spotify_client_id": "",
+  "spotify_client_secret": "",
+  "log_level": "debug",
+  "terminal_log_level": "info",
+  "log_to_stdout": true,
+  "web_search_provider": "auto",
+  "google_cse_api_key": "",
+  "google_cse_cx": "",
+  "web_search_timeout_ms": 10000,
+  "web_search_max_results_default": 5,
+  "web_search_safe_default": 1,
+  "browseros_mcp_url": "http://127.0.0.1:9239/mcp",
+  "browseros_mcp_enabled": true,
+  "browseros_timeout_ms": 15000,
+  "browseros_max_results_default": 5,
+  "browseros_search_engine": "google",
+  "browseros_rate_limit_per_user_ms": 8000,
+  "browseros_allowlist_domains": []
+}
+

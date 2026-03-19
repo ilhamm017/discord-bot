@@ -22,17 +22,149 @@ const execPromise = util.promisify(exec);
  * E1. DuckDuckGo search
  * Note: Uses native fetch (Node 18+).
  */
-async function searchWeb(query, maxResults = 5, safeSearch = true) {
+function readRootConfig() {
+    const getConfig = require("../../config");
+    return getConfig({ fresh: true });
+}
+
+function clampInt(value, min, max, fallback) {
+    const num = Number.isFinite(Number(value)) ? Number(value) : fallback;
+    const int = Number.isInteger(num) ? num : Math.floor(num);
+    return Math.max(min, Math.min(max, int));
+}
+
+function normalizeSafeSearch(value) {
+    if (value === true) return 1;
+    if (value === false) return 0;
+    return clampInt(value, 0, 2, 1);
+}
+
+const __webSearchCache = new Map(); // key -> { value, expiresAt }
+const __WEB_SEARCH_CACHE_TTL_MS = 30_000;
+
+function getCachedWebSearch(key) {
+    const item = __webSearchCache.get(key);
+    if (!item) return null;
+    if (!item.expiresAt || item.expiresAt < Date.now()) {
+        __webSearchCache.delete(key);
+        return null;
+    }
+    return item.value;
+}
+
+function setCachedWebSearch(key, value, ttlMs = __WEB_SEARCH_CACHE_TTL_MS) {
+    __webSearchCache.set(key, { value, expiresAt: Date.now() + Math.max(5_000, ttlMs || __WEB_SEARCH_CACHE_TTL_MS) });
+    if (__webSearchCache.size > 200) {
+        // best-effort pruning (drop earliest iteration order)
+        const overflow = __webSearchCache.size - 200;
+        let dropped = 0;
+        for (const k of __webSearchCache.keys()) {
+            __webSearchCache.delete(k);
+            dropped++;
+            if (dropped >= overflow) break;
+        }
+    }
+}
+
+async function tryGoogleCseSearch({
+    query,
+    maxResults,
+    safeSearch,
+    timeoutMs,
+    apiKey,
+    cx,
+    hl,
+    gl,
+} = {}) {
+    if (!apiKey || !cx) return null;
+    const safe = safeSearch === 0 ? "off" : "active";
+    const num = clampInt(maxResults, 1, 10, 5);
+
+    const u = new URL("https://www.googleapis.com/customsearch/v1");
+    u.searchParams.set("key", String(apiKey));
+    u.searchParams.set("cx", String(cx));
+    u.searchParams.set("q", String(query || ""));
+    u.searchParams.set("safe", safe);
+    u.searchParams.set("num", String(num));
+    if (hl) u.searchParams.set("hl", String(hl));
+    if (gl) u.searchParams.set("gl", String(gl));
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch(u.toString(), { signal: controller.signal }).finally(() => clearTimeout(timeout));
+    if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(`Google CSE returned status ${response.status}${text ? `: ${text.slice(0, 120)}` : ""}`);
+    }
+
+    const json = await response.json();
+    const items = Array.isArray(json?.items) ? json.items : [];
+    const results = items
+        .map((item) => ({
+            title: String(item?.title || "").trim(),
+            snippet: String(item?.snippet || "").trim(),
+            url: String(item?.link || "").trim(),
+        }))
+        .filter((r) => r.title || r.url);
+
+    return results.slice(0, num);
+}
+
+async function searchWeb(query, maxResults = 5, safeSearch = 1) {
     try {
-        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+        const q = String(query || "").trim();
+        if (!q) return [];
+
+        const cfg = readRootConfig();
+        const safe = normalizeSafeSearch(safeSearch);
+        const limit = clampInt(maxResults, 1, 10, 5);
+        const timeoutMs = clampInt(cfg.web_search_timeout_ms, 2_000, 25_000, 10_000);
+
+        const provider = String(cfg.web_search_provider || "").trim().toLowerCase();
+        const googleApiKey = cfg.google_cse_api_key || process.env.GOOGLE_CSE_API_KEY;
+        const googleCx = cfg.google_cse_cx || process.env.GOOGLE_CSE_CX;
+        const hl = cfg.web_search_hl || null;
+        const gl = cfg.web_search_gl || null;
+
+        const cacheKey = `${provider || "auto"}|q=${q}|n=${limit}|safe=${safe}`;
+        const cached = getCachedWebSearch(cacheKey);
+        if (cached) return cached;
+
+        // Prefer Google CSE if explicitly configured or keys exist.
+        const shouldTryGoogle = provider === "google_cse" || (provider === "auto" || !provider) && (googleApiKey && googleCx);
+        if (shouldTryGoogle) {
+            try {
+                const googleResults = await tryGoogleCseSearch({
+                    query: q,
+                    maxResults: limit,
+                    safeSearch: safe,
+                    timeoutMs,
+                    apiKey: googleApiKey,
+                    cx: googleCx,
+                    hl,
+                    gl,
+                });
+                if (Array.isArray(googleResults) && googleResults.length) {
+                    setCachedWebSearch(cacheKey, googleResults);
+                    return googleResults;
+                }
+            } catch (error) {
+                logger.debug(`Google CSE search failed; falling back. ${error?.message || String(error)}`);
+            }
+        }
+
+        // DuckDuckGo HTML fallback (no API key)
+        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
 
         // Use native Node.js fetch (Node 18+)
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
         const response = await fetch(url, {
             headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                "User-Agent": cfg.web_search_user_agent
+                    ? String(cfg.web_search_user_agent)
+                    : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             },
             signal: controller.signal
         }).finally(() => clearTimeout(timeout));
@@ -50,7 +182,7 @@ async function searchWeb(query, maxResults = 5, safeSearch = true) {
         const rawItems = stdout.split('class="result results_links');
 
         for (const rawItem of rawItems.slice(1)) { // skip the first split (header)
-            if (results.length >= maxResults) break;
+            if (results.length >= limit) break;
 
             // Extract Title and URL
             const titleMatch = /<h2 class="result__title">[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(rawItem);
@@ -91,6 +223,7 @@ async function searchWeb(query, maxResults = 5, safeSearch = true) {
             results.push({ title, snippet, url: link });
         }
 
+        setCachedWebSearch(cacheKey, results);
         return results;
     } catch (error) {
         logger.error(`Error in searchWeb: ${error.message}`);

@@ -5,7 +5,7 @@ const { getUserCallName } = require("../../../storage/db");
 let config = {};
 
 try {
-  config = require("../../../config.json");
+  config = require("../../../config")();
 } catch (error) {
   config = {};
 }

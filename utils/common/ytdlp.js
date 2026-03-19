@@ -13,7 +13,7 @@ let binaryRefreshAttempted = false;
 
 let config = {};
 try {
-    config = require(path.join(process.cwd(), "config.json"));
+    config = require("../../config")();
 } catch (error) {
     config = {};
 }

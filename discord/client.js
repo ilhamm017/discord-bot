@@ -2,14 +2,9 @@ const fs = require("fs");
 const path = require("path");
 const { Client, Collection, GatewayIntentBits } = require("discord.js");
 const logger = require("../utils/logger");
-let config = {};
-try {
-    // eslint-disable-next-line global-require
-    config = require("../config.json");
-} catch (error) {
-    config = {};
-}
-const token = config.token || process.env.DISCORD_TOKEN || null;
+const getConfig = require("../config");
+const config = getConfig();
+const token = config.token || process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN || null;
 const { setPanelUpdater } = require("./player/queue");
 const { updateControlPanel } = require("./player/panel");
 

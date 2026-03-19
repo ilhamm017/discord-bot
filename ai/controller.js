@@ -18,14 +18,8 @@ const COMPACT_SYSTEM_PROMPT = [
 ].join(" ");
 
 function readRuntimeConfig() {
-    try {
-        // NOTE: This is intentionally best-effort; config.json may not exist in some deployments.
-        // Using require keeps it simple and fast (cached).
-        // eslint-disable-next-line global-require
-        return require("../config.json");
-    } catch (error) {
-        return {};
-    }
+    const getConfig = require("../config");
+    return getConfig({ fresh: true });
 }
 
 function isExplicitHistoryRequest(text = "") {

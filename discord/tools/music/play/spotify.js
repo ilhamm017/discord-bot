@@ -13,7 +13,7 @@ const {
 let config = {};
 try {
     // eslint-disable-next-line global-require
-    config = require("../../../../config.json");
+    config = require("../../../../config")();
 } catch (error) {
     config = {};
 }

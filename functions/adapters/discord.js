@@ -13,12 +13,8 @@ const {
     buildMemberListComponents,
     registerMemberListSession,
 } = require("../../discord/member_list");
-let config = {};
-try {
-    config = require("../../config.json");
-} catch (error) {
-    config = {};
-}
+const getConfig = require("../../config");
+const config = getConfig();
 
 function getContextMode() {
     const mode = String(config.ai_context_mode || "full").toLowerCase().trim();

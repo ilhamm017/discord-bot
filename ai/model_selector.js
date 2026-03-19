@@ -7,12 +7,12 @@ const rateLimitTracker = new Map();
  * Get configuration for model tiers
  */
 function getConfig() {
-    let config = {};
-    try {
-        config = require("../config.json");
-    } catch (error) {
+let config = {};
+try {
+        config = require("../config")();
+} catch (error) {
         config = {};
-    }
+}
     return config;
 }
 

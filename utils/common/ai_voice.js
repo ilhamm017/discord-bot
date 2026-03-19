@@ -27,8 +27,8 @@ const activeSpeechLocks = new Set();
 
 function readRuntimeConfig() {
     try {
-        const configPath = path.join(process.cwd(), "config.json");
-        return JSON.parse(fs.readFileSync(configPath, "utf8"));
+        const getConfig = require("../../config");
+        return getConfig({ fresh: true });
     } catch (error) {
         return {};
     }

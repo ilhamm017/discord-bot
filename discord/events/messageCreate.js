@@ -1,12 +1,8 @@
 const logger = require("../../utils/logger");
 const { handleDiscordMessage } = require("../../functions/adapters/discord");
 const platform = require("../../functions/platform");
-let config = {};
-try {
-    config = require("../../config.json");
-} catch (error) {
-    config = {};
-}
+const getConfig = require("../../config");
+const config = getConfig();
 const { prefix = "!" } = config;
 
 module.exports = {

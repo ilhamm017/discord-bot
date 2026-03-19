@@ -9,12 +9,12 @@ const { getConfiguredGroqKeys, pickNextKey, markKeyCooldown } = require("./groq_
 const DEFAULT_TIER = "balanced";
 
 function getConfig() {
-    let config = {};
-    try {
-        config = require("../config.json");
-    } catch (error) {
+let config = {};
+try {
+        config = require("../config")();
+} catch (error) {
         config = {};
-    }
+}
 
     const googleApiKey =
         config.google_api_key ||

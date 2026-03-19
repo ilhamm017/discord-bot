@@ -1,4 +1,4 @@
-const config = require("./config.json");
+const config = require("./config")();
 const apiKey = config.google_api_key || process.env.GOOGLE_API_KEY;
 
 if (!apiKey) {

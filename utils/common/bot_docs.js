@@ -19,9 +19,8 @@ let cachedMtimeMs = 0;
 function getPrefix() {
   try {
     // Read lazily so tests can set env/config before requiring this module.
-    // config.json is expected at repo root (process.cwd()).
     // eslint-disable-next-line global-require
-    const config = require("../../config.json");
+    const config = require("../../config")();
     const prefix = typeof config?.prefix === "string" ? config.prefix.trim() : "";
     return prefix || "yova";
   } catch {

@@ -5,7 +5,7 @@ const logger = require("../../../utils/logger");
 
 let config = {};
 try {
-  config = require("../../../config.json");
+  config = require("../../../config")();
 } catch (error) {
   config = {};
 }
