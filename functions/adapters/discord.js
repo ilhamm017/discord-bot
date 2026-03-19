@@ -13,6 +13,17 @@ const {
     buildMemberListComponents,
     registerMemberListSession,
 } = require("../../discord/member_list");
+let config = {};
+try {
+    config = require("../../config.json");
+} catch (error) {
+    config = {};
+}
+
+function getContextMode() {
+    const mode = String(config.ai_context_mode || "full").toLowerCase().trim();
+    return mode === "minimal" ? "minimal" : "full";
+}
 
 /**
  * Validates if the message is safe to process
@@ -51,9 +62,12 @@ async function handleDiscordMessage(message, prompt, options = {}) {
         const sessionId = `discord-${guildId}-${channelId}-${userId}`;
 
         // 1. Build Context
+        const contextMode = getContextMode();
         const callName = await getAuthorCallName(message);
-        const memorySummary = await buildMemorySummary(userId);
-        const serverContextObj = await buildServerContext(message);
+        const memorySummary =
+            contextMode === "minimal" ? "" : await buildMemorySummary(userId);
+        const serverContextObj =
+            contextMode === "minimal" ? null : await buildServerContext(message);
 
         const context = {
             source: "discord",
@@ -64,8 +78,12 @@ async function handleDiscordMessage(message, prompt, options = {}) {
             isReply: !!options.replyContext,
             replyContext: options.replyContext || "",
             capabilities: ["discord", "web", "memory", "session", "system", "reminder", "music"],
-            serverContext: serverContextObj, // Object now
-            userSummary: `User: ${callName || "User"}${memorySummary ? "\n" + memorySummary : ""}`
+            ...(serverContextObj ? { serverContext: serverContextObj } : {}),
+            ...(contextMode === "minimal"
+                ? {}
+                : {
+                    userSummary: `User: ${callName || "User"}${memorySummary ? "\n" + memorySummary : ""}`,
+                }),
         };
 
         // 2. Typing Indicator (Prevent timeout feeling)

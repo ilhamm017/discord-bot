@@ -11,9 +11,21 @@ const COMPACT_SYSTEM_PROMPT = [
     "Kamu Yova, asisten Discord yang ramah dan jelas.",
     "Gunakan Bahasa Indonesia natural, ringkas, dan sopan.",
     "Jika tidak perlu aksi/tool, balas langsung ke pertanyaan user.",
+    "Kalau butuh info server/musik/memori, pakai tool getServerInfo/getMusicStatus/getUserProfile/getUserMemory.",
     'Output wajib JSON valid: {"type":"final","message":"..."} atau {"type":"tool_call",...}.',
     "Jangan tampilkan JSON mentah atau detail teknis ke user.",
 ].join(" ");
+
+function readRuntimeConfig() {
+    try {
+        // NOTE: This is intentionally best-effort; config.json may not exist in some deployments.
+        // Using require keeps it simple and fast (cached).
+        // eslint-disable-next-line global-require
+        return require("../config.json");
+    } catch (error) {
+        return {};
+    }
+}
 
 /**
  * Parses the model output to ensure it's valid JSON according to the strict rules.
@@ -290,6 +302,21 @@ async function tryHandleRuntimeSelfDiagnostics(userInput, context = {}) {
 }
 
 async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHistory = []) {
+    const runtimeConfig = readRuntimeConfig();
+    const contextMode = String(runtimeConfig.ai_context_mode || "full").toLowerCase().trim();
+    const includeUserInfo =
+        typeof runtimeConfig.ai_prompt_include_user_info === "boolean"
+            ? runtimeConfig.ai_prompt_include_user_info
+            : contextMode !== "minimal";
+    const includeIds =
+        typeof runtimeConfig.ai_prompt_include_ids === "boolean"
+            ? runtimeConfig.ai_prompt_include_ids
+            : contextMode !== "minimal";
+    const includeServerContext =
+        typeof runtimeConfig.ai_prompt_include_server_context === "boolean"
+            ? runtimeConfig.ai_prompt_include_server_context
+            : contextMode !== "minimal";
+
     // Default capabilities for backward compatibility (Full Access)
     const userCapabilities = context.capabilities || ["discord", "web", "memory", "session", "system", "reminder", "music", "social", "moderation"];
 
@@ -329,12 +356,12 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
     const serverContextText = stringifyServerContext(context.serverContext);
 
     // Add user info only when using full routing prompt.
-    if (!useCompactPrompt && context.userSummary) {
+    if (!useCompactPrompt && includeUserInfo && context.userSummary) {
         systemMessage += `\n\n[USER INFO]\n${context.userSummary}`;
     }
 
     // Keep IDs only for full mode (mainly needed for tool execution path).
-    if (!useCompactPrompt) {
+    if (!useCompactPrompt && includeIds) {
         systemMessage += `\n\n[IDs]\nGuild: ${context.guildId}\nChannel: ${context.channelId}`;
     }
 
@@ -342,7 +369,7 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
         systemMessage += `\n\n[REPLY CONTEXT]\n${replyContext}`;
     }
 
-    if (serverContextText) {
+    if (includeServerContext && serverContextText) {
         systemMessage += `\n\n[SERVER CONTEXT]\n${serverContextText}`;
     }
 
