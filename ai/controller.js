@@ -40,6 +40,44 @@ function safeClampInt(value, min, max, fallback) {
     return Math.max(min, Math.min(max, int));
 }
 
+function extractCallNameFromUserSummary(userSummary = "") {
+    const text = String(userSummary || "").trim();
+    if (!text) return "";
+    const firstLine = text.split(/\r?\n/)[0] || "";
+    const match = firstLine.match(/^User:\s*(.+)\s*$/i);
+    if (!match?.[1]) return "";
+    const name = match[1].trim();
+    if (!name || name.toLowerCase() === "user") return "";
+    return name.slice(0, 24);
+}
+
+function tryHandleTrivialSmallTalk(userInput, context = {}) {
+    const text = normalizeInlineText(userInput).toLowerCase();
+    if (!text) return null;
+
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const callName = extractCallNameFromUserSummary(context.userSummary || "");
+
+    // Greeting
+    if (wordCount <= 2 && /^(halo+|hai+|hi+|helo+|hallo+|ass?alamualaikum|p)$/i.test(text)) {
+        return callName
+            ? `Halo, ${callName}. Ada yang bisa kubantu?`
+            : "Halo. Ada yang bisa kubantu?";
+    }
+
+    // Simple connectivity checks
+    if (wordCount <= 3 && /^(test|tes|testing|cek|check)$/i.test(text)) {
+        return "Siap, aku online.";
+    }
+
+    // Acknowledgements
+    if (wordCount <= 2 && /^(ok|oke|sip|siap|mantap|makasih|terima kasih|thanks)$/i.test(text)) {
+        return "Oke.";
+    }
+
+    return null;
+}
+
 function formatRecentMessagesForContext(items = [], {
     maxTotalChars = 1200,
     maxPerMessageChars = 160,
@@ -415,6 +453,11 @@ async function runAiAgent(userInput, context = {}, maxIterations = 5, messageHis
         needsTool,
         usedTools,
     });
+
+    const trivial = tryHandleTrivialSmallTalk(userInput, context);
+    if (trivial) {
+        return { type: "final", message: trivial, meta: buildMeta() };
+    }
 
     const useCompactPrompt =
         !context.isReply &&
